@@ -9,7 +9,7 @@ The parent folder's `../CLAUDE.md` summarises the team's confirmed plan. This co
 Python 3.10+, **standard library only** (no requirements file, no third-party deps; keep it that way). Local git repo (no remote); `pyright studybridge` type-checks, but most of its errors are false positives from `= None` defaults and `fail()` in `gate1` not being typed `NoReturn`.
 
 ```bash
-python -m unittest discover -s tests -t .                                  # all 146 tests (~1s)
+python -m unittest discover -s tests -t .                                  # all 147 tests (~1s)
 python -m unittest tests.test_payments.TestStories                         # the 31 stories
 python -m unittest tests.test_security.TestInjection.test_detector         # one test
 python -m studybridge --today 2026-10-13 --tier TRANSACT web               # UI on http://127.0.0.1:8765

@@ -1,0 +1,13 @@
+# Render Blueprint for an optional PUBLIC demo of the sandbox (no real money, no login).
+# After the first deploy, set STUDYBRIDGE_ALLOWED_HOSTS to your service's host name,
+# e.g. studybridge.onrender.com (no https://, no port), then redeploy.
+services:
+  - type: web
+    name: studybridge
+    runtime: docker
+    plan: free
+    envVars:
+      - key: STUDYBRIDGE_ALLOWED_HOSTS
+        sync: false
+      - key: STUDYBRIDGE_TODAY
+        value: "2026-10-13"
