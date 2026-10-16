@@ -109,7 +109,7 @@ How it is enforced:
 
 | Area | Control |
 |---|---|
-| Network exposure | The web server binds to `127.0.0.1`; Docker publishes on `127.0.0.1` only when run as documented (`-p 127.0.0.1:8765:8765`) |
+| Network exposure | The web server binds to `127.0.0.1`; Docker publishes on `127.0.0.1` only when run as documented (`-p 127.0.0.1:8765:8765`). The host check answers only local names unless the operator lists a host in `STUDYBRIDGE_ALLOWED_HOSTS` for an optional public demo (README, 'Hosted demo'); that demo has no login, so any visitor shares one sandbox and can reset it |
 | CSRF and DNS rebinding | Every POST requires `Content-Type: application/json` **and** `X-StudyBridge: 1`, which a cross-site form cannot send. Requests whose `Host` is not 127.0.0.1/localhost, or POSTs with a foreign `Origin`, get 403 (`test_web_refuses_foreign_host_origin_and_bad_length`) |
 | XSS | All text rendered with `textContent`; CSP `default-src 'self'; script-src 'self'`; `frame-ancestors 'none'`; `nosniff` |
 | Input size | Request body ≤ 8 KB (a missing, negative or non-numeric length is refused); chat messages are cut to 1,000 characters on the web entry point (the terminal CLI is not capped); bad tier, clock or validity values are refused (`INVALID_CHOICE`) |
@@ -142,8 +142,8 @@ How it is enforced:
 
 ## 6. Test summary
 
-`python -m unittest discover -s tests -t .` runs 152 tests, all passing: 15 core tests, 26 security
-tests in `tests/test_security.py`, 88 payment tests in `tests/test_payments.py` (one of which
+`python -m unittest discover -s tests -t .` runs 153 tests, all passing: 15 core tests, 26 security
+tests in `tests/test_security.py`, 89 payment tests in `tests/test_payments.py` (one of which
 plays all 31 stories and checks every expected outcome code) and 23 data tests in `tests/test_data.py`
 (the sample data is consistent, and every reason code is exercised by a test or story).
 

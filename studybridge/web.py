@@ -11,6 +11,7 @@ the page renders all text with textContent, never innerHTML. The role
 switch is a sandbox demo control: there is no user login (known risk).
 """
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -25,6 +26,13 @@ from .stories import STORY_BY_ID
 STATIC = PACKAGE_ROOT / "static"
 MAX_BODY = 8 * 1024
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _allowed_hosts() -> set:
+    """Local names, plus host names the operator lists in STUDYBRIDGE_ALLOWED_HOSTS (comma-separated, no port).
+    Empty by default. Only for a deliberate public demo of the sandbox (see README 'Hosted demo')."""
+    extra = {h.strip().lower() for h in os.environ.get("STUDYBRIDGE_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    return _LOCAL_HOSTS | extra
 _FILES = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
           "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
@@ -62,6 +70,7 @@ def _tamper_test(path: Path) -> dict:
 
 def _make_handler(sandbox):
     lock = threading.Lock()
+    allowed = _allowed_hosts()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -85,10 +94,10 @@ def _make_handler(sandbox):
             """Only answer requests addressed to this machine. A DNS-rebinding page sends its own host name
             in Host, and a cross-site page sends its own Origin; both are refused."""
             host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
-            if host not in _LOCAL_HOSTS:
+            if host not in allowed:
                 return False
             origin = self.headers.get("Origin")
-            if post and origin and (urlsplit(origin).hostname or "").lower() not in _LOCAL_HOSTS:
+            if post and origin and (urlsplit(origin).hostname or "").lower() not in allowed:
                 return False
             return True
 

@@ -43,8 +43,8 @@ See [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) and
 Requires Python 3.10+. There are **no third-party dependencies**; only the standard library is used.
 
 ```bash
-git clone https://github.com/MehazabinLamiha/StudyBridge.git && cd StudyBridge
-python -m unittest discover -s tests -t .                      # 152 tests
+git clone https://github.com/Nuraalam25/studybridge.git && cd studybridge
+python -m unittest discover -s tests -t .                      # 153 tests
 python -m studybridge --today 2026-10-13 --tier TRANSACT web    # http://127.0.0.1:8765
 python -m studybridge --today 2026-10-13 demo                   # the 31 stories -> evidence/
 python -m studybridge stories                                   # list the 31 stories
@@ -117,6 +117,12 @@ docker run --rm -p 127.0.0.1:8765:8765 studybridge
 Do not expose the web UI to the internet. It has no user authentication, because it is a
 single-user sandbox (see the known-risk list).
 
+**Hosted demo (optional, sandbox only):** `render.yaml` deploys the Docker image to Render for a
+public demo. Set `STUDYBRIDGE_ALLOWED_HOSTS` to the service's host name (the host check refuses every
+other name; by default only local names are allowed) and keep `STUDYBRIDGE_TODAY=2026-10-13`. Anyone with the link
+shares one sandbox, can reset it and can change the tier, and the state resets when the service restarts or
+sleeps. There is no real money. Qwen needs a local Ollama, so the hosted demo runs rules-only.
+
 ## Example requests
 
 ```
@@ -158,7 +164,7 @@ studybridge/
     audit.py        hash-chained audit log, PII masking
   web.py static/    local web UI (strict CSP, CSRF header, textContent rendering)
   demo.py           scripted run of the 31 stories that writes the evidence
-tests/              152 unit tests
+tests/              153 unit tests
 docs/               technical documentation, security self-assessment
 evidence/           sandbox operation logs; v0.1 runs in evidence/archive_v0.1
 data/               fictional sample profile, invoices and payees

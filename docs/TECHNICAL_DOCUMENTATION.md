@@ -404,7 +404,7 @@ regression test too.
 
 | Check | Result |
 |---|---|
-| Unit tests (v0.3) | 152 / 152 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
+| Unit tests (v0.3) | 153 / 153 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
 | Scripted runs v0.3 | To be generated from the final code after the freeze (rules-only and with qwen2.5:7b); the counts go here and in `evidence/README.md` from each `summary.json` |
 | v0.2 runs (`evidence/run_20261015_*`, earlier version, 25 stories) | rules-only 25/25; with Qwen 25/25, guard cut 15 sentences, 2 residual entity-binding errors; first Qwen run 24/25 (fixed, now regression tests) |
 | v0.1 runs (archived in `evidence/archive_v0.1/`) | run A rules-only, run B guard v1, run C guard v2: real history of the earlier version, kept unedited |

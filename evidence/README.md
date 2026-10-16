@@ -12,8 +12,14 @@ was cut short later can be detected.
 
 ## v0.3 runs (plan v4, 31 stories + 5 information requests)
 
-None yet. After the code freeze, run both commands (rules-only and `--llm`) and add a table here from
-each `summary.json`. Only these runs may be quoted on slides.
+| Folder | LLM | Stories as expected | Info requests as expected | Executed payments | Sentences cut by guard | Audit chain | Tamper test on copy |
+|---|---|---|---|---|---|---|---|
+| `run_20261016_211539_rules` | off (rules only) | **31/31** | **5/5** | 11 | 1 (the simulated malformed model in D5) | OK (370 records) | detected at record 12 |
+
+Made on 16 Oct 2026 (Python 3.13) on the code with the 19 BDT per CNY rate and the BDT 450,000 cap. The
+`--llm` (Qwen) run is still to be made with Ollama (`python -m studybridge --llm --today 2026-10-13 demo`);
+add its row here from its `summary.json`. Only runs listed here may be quoted on slides. If the code changes
+again, make both runs again.
 
 ## v0.2 runs (earlier version: plan v2, 25 stories)
 

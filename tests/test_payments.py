@@ -867,5 +867,30 @@ class TestScreenData(unittest.TestCase):
         self.assertTrue(case["why"] and case["fix"])
 
 
+class TestHostedDemoHosts(unittest.TestCase):
+    def test_extra_host_allowed_only_when_listed(self):
+        import http.client
+        import os
+        import threading
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+        from studybridge.web import _make_handler
+
+        def status(env, host):
+            with mock.patch.dict(os.environ, env):
+                srv = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(make_sandbox()))
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+                c.request("GET", "/api/state", headers={"Host": host})
+                return c.getresponse().status
+            finally:
+                srv.shutdown()
+
+        self.assertEqual(status({"STUDYBRIDGE_ALLOWED_HOSTS": ""}, "demo.onrender.com"), 403)
+        self.assertEqual(status({"STUDYBRIDGE_ALLOWED_HOSTS": "demo.onrender.com"}, "demo.onrender.com"), 200)
+        self.assertEqual(status({"STUDYBRIDGE_ALLOWED_HOSTS": "demo.onrender.com"}, "evil.example"), 403)
+
+
 if __name__ == "__main__":
     unittest.main()
