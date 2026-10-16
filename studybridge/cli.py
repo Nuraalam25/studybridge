@@ -1,8 +1,8 @@
-"""Command-line entry points: chat, demo, web, verify-audit."""
+"""Command-line entry points: chat, demo, web, verify-audit, stories."""
 import argparse
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from . import DEFAULT_PROFILE, PROJECT_ROOT
@@ -29,7 +29,8 @@ def build_agent(args) -> StudentFinanceAgent:
 
 def cmd_chat(args):
     agent = build_agent(args)
-    print("StudyBridge sandbox. Commands: /confirm <id>, /cancel <id>, /wallet, /verify, /quit")
+    print("StudyBridge sandbox (you are the student). Commands: /confirm <id>, /cancel <id>, /wallet, "
+          "/verify, /quit\nFamily actions (sandbox only, from this screen): /approve <REQ-id>, /reject <REQ-id>")
     while True:
         try:
             msg = input("\nyou> ").strip()
@@ -43,6 +44,9 @@ def cmd_chat(args):
             resp = agent.confirm(msg.split(maxsplit=1)[1])
         elif msg.startswith("/cancel "):
             resp = agent.cancel(msg.split(maxsplit=1)[1])
+        elif msg.startswith(("/approve ", "/reject ")):
+            # The actor comes from the command, not from chat text.
+            resp = agent.family_decide(msg.split(maxsplit=1)[1], msg.startswith("/approve"), actor="family")
         elif msg == "/wallet":
             resp = agent.handle("show my wallet balance")
         elif msg == "/verify":
@@ -56,7 +60,7 @@ def cmd_chat(args):
 def cmd_verify(args):
     result = AuditLog(args.audit).verify()
     print(result)
-    sys.exit(0 if result["ok"] else 1)
+    sys.exit(0 if result["ok"] else (2 if result.get("error") else 1))   # 2 = no log found, 1 = chain broken
 
 
 def main(argv=None):
@@ -70,6 +74,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("chat")
     sub.add_parser("verify-audit")
+    sub.add_parser("stories", help="list the 31 test stories")
     demo = sub.add_parser("demo")
     demo.add_argument("--out", default=str(PROJECT_ROOT / "evidence"))
     web = sub.add_parser("web")
@@ -84,6 +89,15 @@ def main(argv=None):
     elif args.cmd == "demo":
         from .demo import run_demo
         run_demo(args, Path(args.out))
+    elif args.cmd == "stories":
+        from .stories import GROUPS, STORIES
+        for s in STORIES:
+            print(f"{s.id}  {GROUPS[s.group]:24s} {s.title}")
     elif args.cmd == "web":
+        from .sandbox import Sandbox
         from .web import serve
-        serve(build_agent(args), args.port, args.host)
+        probe = build_agent(args)
+        start = datetime.fromisoformat(args.today + "T09:00") if args.today else None
+        sandbox = Sandbox(args.profile, probe.audit, llm=probe.llm, tier=Tier[args.tier], start=start,
+                          ticking=True)
+        serve(sandbox, args.port, args.host)

@@ -7,32 +7,198 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <h1>StudyBridge</h1>
-    <p class="sub">Cross-border &amp; student finance assistant <span class="badge">SANDBOX</span></p>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">SB</div>
+      <div>
+        <h1>StudyBridge</h1>
+        <p class="tagline">AI suggests · code decides · the student confirms last <span class="badge">SANDBOX · no real money</span></p>
+      </div>
+    </div>
+    <div class="controls" aria-label="Demo controls">
+      <div class="clock" title="Sandbox clock: approval windows and expiries read this clock">
+        <span class="clock-label">Sandbox time</span>
+        <span id="clock">—</span>
+        <button type="button" class="chip" data-advance="1">+1 h</button>
+        <button type="button" class="chip" data-advance="25">+25 h</button>
+        <button type="button" class="chip" data-advance="73">+73 h</button>
+      </div>
+      <label class="tier">Tier
+        <select id="tier" aria-label="Permission tier">
+          <option>PUBLIC</option><option>READ</option><option>ADVISE</option><option>TRANSACT</option>
+        </select>
+      </label>
+      <span id="llm" class="chip status-chip">Qwen: —</span>
+      <button type="button" id="open-stories" class="primary">▶ Stories</button>
+      <button type="button" id="reset" class="ghost">Reset</button>
+    </div>
   </header>
-  <main>
-    <section class="panel" aria-label="Wallet">
-      <h2>Wallet</h2>
-      <div id="owner"></div>
-      <ul id="balances"></ul>
-      <div id="total"></div>
-      <div id="tier"></div>
-      <h3>Saved beneficiaries</h3>
-      <ul id="beneficiaries"></ul>
-      <button id="verify" type="button">Verify audit log</button>
-      <div id="verify-result"></div>
-      <h3>Try</h3>
-      <ul id="examples"></ul>
-    </section>
-    <section class="panel chat" aria-label="Chat">
-      <div id="log" aria-live="polite"></div>
-      <form id="form">
-        <input id="msg" autocomplete="off" placeholder="e.g. compare the cheapest way to send 50000 BDT to CNY" maxlength="1000">
-        <button type="submit">Send</button>
+
+  <div id="caption" class="caption" hidden aria-live="polite">
+    <div class="caption-main">
+      <span id="cap-story" class="cap-story"></span>
+      <span id="cap-text"></span>
+    </div>
+    <div class="caption-side">
+      <span id="cap-progress"></span>
+      <button type="button" id="cap-pause" class="chip">Pause</button>
+      <button type="button" id="cap-stop" class="chip">Stop</button>
+    </div>
+  </div>
+
+  <nav class="tabs" aria-label="Screens">
+    <button type="button" data-tab="student" class="active">Student</button>
+    <button type="button" data-tab="glass">Glass Box</button>
+    <button type="button" data-tab="family">Family</button>
+  </nav>
+
+  <main class="stage">
+    <!-- STUDENT PHONE -->
+    <section class="phone student" id="pane-student" aria-label="Student phone">
+      <div class="phone-bar">
+        <div><strong id="owner">Student</strong><span class="where">Shenzhen · student</span></div>
+        <span class="role-lock" title="The actor is set by this screen, never by chat text or the AI">role: student 🔒</span>
+      </div>
+      <div class="wallet-card">
+        <div class="wc-label">Family-funded wallet</div>
+        <div id="wc-main" class="wc-main">—</div>
+        <div id="wc-sub" class="wc-sub"></div>
+      </div>
+      <div id="confirms" class="confirms" aria-live="polite"></div>
+      <div id="thread" class="thread" aria-live="polite"></div>
+      <div id="quick" class="quick" aria-label="Example requests"></div>
+      <div class="row tools"><button type="button" id="open-raise" class="chip">Ask to raise my limit</button></div>
+      <form id="form" class="composer">
+        <input id="msg" autocomplete="off" maxlength="1000" placeholder="e.g. pay invoice INV-0003" aria-label="Message to the assistant">
+        <button type="submit" class="primary">Send</button>
       </form>
     </section>
+
+    <!-- GLASS BOX -->
+    <section class="glass" id="pane-glass" aria-label="Glass Box">
+      <div class="glass-head">
+        <div>
+          <h2>Glass Box</h2>
+          <p class="muted">Every step of the case as it runs. Colours show who acts.</p>
+        </div>
+        <select id="case-select" aria-label="Choose a case"></select>
+      </div>
+      <div class="legend">
+        <span class="lg lg-student">Student</span><span class="lg lg-qwen">Qwen (language only)</span>
+        <span class="lg lg-code">Code (decides)</span><span class="lg lg-bank">Simulated bank</span><span class="lg lg-family">Family</span>
+      </div>
+      <div id="case-title" class="case-title"></div>
+      <div id="pipeline" class="pipeline"></div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>Gate 1 checks</h3>
+          <ul id="checks" class="checks"><li class="muted">Send a payment request to see the checks.</li></ul>
+        </div>
+        <div class="card">
+          <h3>What the AI saw</h3>
+          <div id="ai" class="ai"><p class="muted">No request yet.</p></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Limits today</h3>
+        <div id="meters" class="meters"></div>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h3>Audit chain <span class="muted small">hash-chained, account numbers masked</span></h3>
+          <div class="row">
+            <button type="button" id="verify" class="chip">Verify chain</button>
+            <button type="button" id="tamper" class="chip danger">Tamper test (on a copy)</button>
+          </div>
+        </div>
+        <div id="verify-result" class="verify-result"></div>
+        <div id="chain" class="chain"></div>
+      </div>
+    </section>
+
+    <!-- FAMILY PHONE -->
+    <section class="phone family" id="pane-family" aria-label="Family phone">
+      <div class="phone-bar">
+        <div><strong id="fam-name">Family</strong><span class="where" data-i18n="where">Dhaka · family sender</span></div>
+        <button type="button" id="lang" class="chip" aria-label="Switch language">বাংলা</button>
+      </div>
+      <div class="fam-scroll">
+        <h3><span data-i18n="inbox">Approval inbox</span> <span id="inbox-count" class="count"></span></h3>
+        <div id="inbox" class="inbox"></div>
+
+        <div class="card soft">
+          <div class="row-between">
+            <span data-i18n="limit">Daily limit</span>
+            <strong id="limit-val">CNY 500</strong>
+          </div>
+          <input type="range" id="limit" min="500" max="1000" step="50" aria-label="Family daily limit (CNY)">
+          <div class="row-between small muted"><span>CNY 500</span><span>CNY 1,000</span></div>
+          <div class="meter"><div id="fam-meter" class="meter-fill family-fill"></div></div>
+          <div id="fam-spent" class="small muted"></div>
+        </div>
+
+        <div class="card soft">
+          <h4 data-i18n="docs">Documents</h4>
+          <ul id="docs" class="docs"></ul>
+        </div>
+
+        <div class="card soft">
+          <h4 data-i18n="allowances">Open allowances</h4>
+          <ul id="allowances" class="list"></ul>
+        </div>
+
+        <div class="card soft">
+          <h4 data-i18n="history">History</h4>
+          <ul id="history" class="list small"></ul>
+        </div>
+        <p class="small muted" data-i18n="note">Only this screen can approve. The assistant and the student cannot.</p>
+      </div>
+    </section>
   </main>
+
+  <dialog id="stories" aria-label="Test stories">
+    <div class="dlg-head">
+      <div>
+        <h2>The 31 test stories</h2>
+        <p class="muted">Each story starts from a fresh sandbox and plays through the real app, step by step.</p>
+      </div>
+      <div class="row">
+        <label class="small">Speed
+          <select id="speed"><option value="2600">Presenter</option><option value="1400" selected>Normal</option><option value="500">Fast</option></select>
+        </label>
+        <button type="button" id="play-all" class="primary">▶ Play all</button>
+        <button type="button" id="close-stories" class="ghost" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div id="story-list" class="story-list"></div>
+  </dialog>
+
+  <dialog id="raise" aria-label="Ask to raise my limit">
+    <form id="raise-form" class="raise-form">
+      <h2>Ask to raise my limit</h2>
+      <p id="raise-now" class="muted small"></p>
+      <label>Limit for that day (CNY)
+        <input id="raise-cny" type="number" min="550" max="1000" step="50" required>
+      </label>
+      <label>Day
+        <input id="raise-date" type="date" required>
+      </label>
+      <label>Reason for your family
+        <textarea id="raise-note" maxlength="300" rows="3" placeholder="e.g. Friend's birthday dinner, I am paying for the cake."></textarea>
+      </label>
+      <p class="small muted">Your family sees your note exactly as you write it. It never changes a rule by itself.</p>
+      <div class="row">
+        <button type="submit" class="primary">Send to my family</button>
+        <button type="button" id="raise-cancel" class="ghost">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/i18n.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

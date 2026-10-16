@@ -58,7 +58,7 @@ class TestConfirmationFlow(unittest.TestCase):
     def test_prepare_then_confirm_then_replay(self):
         agent = make_agent()
         before = agent.wallet.balances["BDT"]
-        r = agent.handle("send 5700 CNY to my university for tuition")
+        r = agent.handle("pay 38 CNY at the canteen")
         self.assertIsNotNone(r.pending_action)
         self.assertEqual(agent.wallet.balances["BDT"], before)          # nothing moved yet
         done = agent.confirm(r.pending_action["id"])
@@ -89,12 +89,13 @@ class TestConfirmationFlow(unittest.TestCase):
     def test_unsaved_beneficiary_refused(self):
         r = make_agent().handle("send 3000 BDT to account 99887766554433")
         self.assertIsNone(r.pending_action)
-        self.assertIn("saved beneficiary", r.text)
+        self.assertEqual(r.code, "PAYEE_NOT_VERIFIED")
+        self.assertIn("saved payee", r.text)
 
     def test_insufficient_balance(self):
         agent = make_agent()
         with self.assertRaises(WalletError):
-            agent.wallet.send("landlord", "999999", "BDT", "bank_swift", "k1")
+            agent.wallet.send("dorm_landlord", "999999", "BDT", "bank_swift", "k1")
 
     def test_idempotency(self):
         w = SandboxWallet.from_file(DEFAULT_PROFILE)
@@ -128,16 +129,18 @@ class TestInjection(unittest.TestCase):
 class TestLLMHardening(unittest.TestCase):
     def test_hallucinated_amount_dropped(self):
         llm = FakeLLM({"intent": "compare_remittance", "amount": 99999, "from_currency": "BDT",
-                       "to_currency": "CNY", "deadline_days": None, "beneficiary": None})
+                       "to_currency": "CNY", "deadline_days": None, "payee": None, "invoice_id": None})
         r = make_agent(llm=llm, narrate=False).handle("compare the cheapest way to send 50000 BDT to CNY")
         self.assertEqual(D(r.data["amount"]), D("50000.00"))
 
     def test_llm_cannot_create_money_movement_alone(self):
-        llm = FakeLLM({"intent": "send_money", "amount": 1000, "from_currency": "BDT",
-                       "to_currency": None, "deadline_days": None, "beneficiary": "landlord"})
+        llm = FakeLLM({"intent": "pay", "amount": 1000, "from_currency": "BDT",
+                       "to_currency": None, "deadline_days": None, "payee": "landlord", "invoice_id": None})
         r = make_agent(llm=llm, narrate=False).handle("what is the rate for 1000 BDT to CNY")
         self.assertIsNone(r.pending_action)
-        self.assertIn("downgraded", r.parse_source)
+        self.assertIn("disagreed", r.parse_source)
+        self.assertEqual(r.code, "CLARIFY")
+        self.assertIsNone(r.reading)          # the rules reader saw no payment, so there is nothing to confirm
 
     def test_llm_offline_falls_back(self):
         r = make_agent(llm=FakeLLM(None), narrate=False).handle("show my wallet balance")
@@ -146,7 +149,7 @@ class TestLLMHardening(unittest.TestCase):
 
     def test_guard_cuts_invented_number(self):
         llm = FakeLLM({"intent": "fx_quote", "amount": 10000, "from_currency": "BDT", "to_currency": "CNY",
-                       "deadline_days": None, "beneficiary": None},
+                       "deadline_days": None, "payee": None, "invoice_id": None},
                       text="You would receive CNY 573.11. That is a 7.5% saving versus banks.")
         r = make_agent(llm=llm).handle("how much is 10000 BDT in CNY")
         self.assertEqual(len(r.guard_removed), 1)

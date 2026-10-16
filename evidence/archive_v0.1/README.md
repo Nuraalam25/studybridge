@@ -1,8 +1,4 @@
-# Archived execution evidence: version 0.1.0 (earlier version)
-
-> **These runs come from the earlier v0.1.0 code, before the invoice, approval and allowance changes.**
-> They are kept unchanged as real history. They are not evidence for the final build. Evidence for the
-> final build is in the folders beside this one (see `../README.md`).
+# Execution Evidence (simulated-account / sandbox operation logs)
 
 All runs use the fictional profile in `data/sample_profile.json`, with the planner date fixed
 at 2026-10-13. All 14 scripted requests are in `studybridge/demo.py`. No real account or
@@ -55,6 +51,6 @@ Each folder contains:
 Verify any audit log yourself:
 
 ```bash
-python run.py --audit evidence/archive_v0.1/run_C_llm_guard_v2/audit.jsonl verify-audit
-python run.py --audit evidence/archive_v0.1/run_C_llm_guard_v2/audit_tampered_copy.jsonl verify-audit   # exits 1
+python run.py --audit evidence/run_C_llm_guard_v2/audit.jsonl verify-audit
+python run.py --audit evidence/run_C_llm_guard_v2/audit_tampered_copy.jsonl verify-audit   # exits 1
 ```

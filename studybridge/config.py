@@ -64,7 +64,36 @@ LIMITS = {
     "per_tx_home": D("400000"),
     "daily_home": D("600000"),
 }
-CONFIRM_TTL_SECONDS = 300
+CONFIRM_TTL_SECONDS = 120          # the student's final confirmation: 2 minutes, single use
+
+# Payment settings (plan v3). All are ASSUMPTIONS (team design, illustrative).
+# The bank limit is applied as a DAILY total of card spending: a team design
+# that is stricter than the public rule found (USD 300 per transaction).
+PAYMENT = {
+    "currency": "CNY",
+    "family_limit_min_cny": D("500"),
+    "family_limit_max_cny": D("1000"),
+    "family_limit_default_cny": D("500"),
+    "bank_daily_limit_usd": D("300"),
+    "exempt_cap_cny": D("300"),              # food and QR payments, each; fixed, the family cannot change it
+    "family_approval_hours": 24,
+    "allowance_default_hours": 72,
+    "allowance_max_hours": 7 * 24,
+    "max_open_allowances": 3,
+    "monthly_allowance_max_months": 6,       # rent only; one payment per calendar month
+    "account_change_hold_hours": 24,         # wait after the family's phone check
+    "limit_raise_days_ahead": 7,             # a one-day raise can be booked up to 7 days ahead
+}
+# Payee types and whether a stored invoice / bill / quote is required.
+PAYEE_TYPES = {
+    "institution": True,        # tuition path, verified account only
+    "landlord": True,           # monthly rent bill
+    "merchant": True,           # price quote
+    "qr_merchant": False,       # name-only check, capped
+    "food": False,              # canteen, groceries, capped
+    "person_or_agent": True,    # blocked for tuition; only the family saves one
+}
+EXEMPT_TYPES = {"qr_merchant", "food"}
 
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"

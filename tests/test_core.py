@@ -55,27 +55,32 @@ class TestRemittance(unittest.TestCase):
 
 class TestTuition(unittest.TestCase):
     BAL = {"BDT": D("520000"), "CNY": D("3200")}
+    TODAY = date(2026, 10, 13)
 
-    def test_on_track_four_tranches(self):
-        res = tuition.plan(26000, "CNY", date(2026, 11, 15), date(2026, 10, 13), self.BAL)
+    @staticmethod
+    def inv(due, amount="22800", iid="INV-0003"):
+        return {"id": iid, "purpose": "Tuition 2026-27 (full year)", "amount": amount, "currency": "CNY", "due": due}
+
+    def test_one_transfer_for_the_full_invoice(self):
+        res = tuition.plan([self.inv("2026-11-15")], self.TODAY, self.BAL)
         self.assertEqual(res["status"], "ON_TRACK")
-        self.assertEqual(len(res["tranches"]), 4)
-        self.assertEqual(sum(t["recipient_gets"] for t in res["tranches"]), D("22800.00"))
+        self.assertEqual(len(res["invoices"]), 1)
+        row = res["invoices"][0]
+        self.assertEqual(row["amount"], D("22800.00"))
+        self.assertEqual(row["send_amount"], D("399813.88"))     # just under the BDT 400,000 per-payment cap
+        self.assertEqual(row["send_by"], "2026-11-11")           # due - 3 safety days - 1 delivery day
 
     def test_funding_gap(self):
-        res = tuition.plan(26000, "CNY", date(2026, 11, 15), date(2026, 10, 13), {"BDT": D("100000"), "CNY": D(0)})
+        res = tuition.plan([self.inv("2026-11-15")], self.TODAY, {"BDT": D("100000")})
         self.assertEqual(res["status"], "FUNDING_GAP")
         self.assertGreater(res["funding_gap"], 0)
 
     def test_urgent_and_overdue(self):
-        urgent = tuition.plan(26000, "CNY", date(2026, 10, 14), date(2026, 10, 13), self.BAL)
-        self.assertEqual(urgent["status"], "URGENT")
-        overdue = tuition.plan(26000, "CNY", date(2026, 10, 1), date(2026, 10, 13), self.BAL)
-        self.assertEqual(overdue["status"], "OVERDUE")
+        self.assertEqual(tuition.plan([self.inv("2026-10-14")], self.TODAY, self.BAL)["status"], "URGENT")
+        self.assertEqual(tuition.plan([self.inv("2026-10-01")], self.TODAY, self.BAL)["status"], "OVERDUE")
 
-    def test_covered(self):
-        res = tuition.plan(1000, "CNY", date(2026, 11, 15), date(2026, 10, 13), self.BAL)
-        self.assertEqual(res["status"], "COVERED")
+    def test_nothing_due(self):
+        self.assertEqual(tuition.plan([], self.TODAY, self.BAL)["status"], "NOTHING_DUE")
 
 
 class TestCredit(unittest.TestCase):

@@ -22,3 +22,11 @@ def quote(amount, src: str, dst: str, spread: Decimal = WALLET_FX_SPREAD) -> dic
         "you_get": q(amount * applied),
         "rate_source": RATE_SOURCE,
     }
+
+
+def cost_to_deliver(amount_dst, src: str, dst: str, spread: Decimal = WALLET_FX_SPREAD) -> Decimal:
+    """Source amount the card debits so the payee receives exactly amount_dst."""
+    src, dst = norm_ccy(src), norm_ccy(dst)
+    if src == dst:
+        return q(amount_dst)
+    return q(D(amount_dst) / (mid_rate(src, dst) * (1 - spread)))

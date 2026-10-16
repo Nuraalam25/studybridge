@@ -1,53 +1,58 @@
 # Sample data for StudyBridge
 
-**Everything in this folder is fictional or illustrative.** Every university, shop, landlord, account number, invoice and amount is made up for the sandbox. Account numbers starting `999...` are obviously fake on purpose. No real person, bank or institution is meant. The project uses no real money.
+**Everything in this folder is fictional or illustrative.** Every university, shop, landlord, account
+number, phone number, invoice and amount is made up for the sandbox. No real person, bank or
+institution is meant, and the project uses no real money. (Based on Nura's data notes for v0.1,
+updated for the v0.3 format.)
 
 ## File
 
-`sample_profile.json` is the sandbox profile the app loads. It holds the owner, balances, saved beneficiaries, tuition, credit profile and transactions, plus the parts added for the invoice and approval work.
+`sample_profile.json` is the profile the app loads: the student (owner), the family and its daily
+limit, balances, saved payees, invoices, documents, credit profile and transactions.
 
-## What was added to the profile
+`tests/test_data.py` checks this file: every reference resolves, the code each invoice gets follows
+from the data alone, every bad invoice has exactly one problem, and the amounts the stories rely on
+still hold. Run it after any change here.
 
-**Payee fields.** Every beneficiary has three new fields:
+## Payees (7)
 
-- `type`: one of `institution`, `landlord`, `merchant`, `qr_merchant`, `food`, `person_or_agent`
-- `verified`: `true` or `false`
-- `details_changed`: `true` if the account details changed since verification
+Each payee has a `type` (stored data, never taken from a message or from the AI), `verified`, and a
+`phone_on_file` where an account can change (the family calls this number to check a new account).
 
-The type is read from this data and never from a message or from the AI model.
+| id | type | Note |
+|---|---|---|
+| `sample_university` | institution | Tuition path, verified account only |
+| `dorm_landlord` | landlord | Monthly rent bills |
+| `techmart`, `homegoods` | merchant | Price quotes (the fridge) |
+| `canteen` | food | No account, no invoice: capped at CNY 300 each |
+| `bubble_tea` | qr_merchant | Same cap as food |
+| `bright_future` | person_or_agent | A consultancy, pre-saved in the sample data (the app cannot add payees); blocked for tuition |
 
-**Beneficiaries (14).** The two original ones (`university`, `landlord`) are unchanged apart from the new fields. New: three more universities, two merchants, two food payees, one QR merchant, and four deliberately bad accounts:
+## Invoices, bills and quotes (15)
 
-| id | What it is |
-|---|---|
-| `consultancy_agent` | An agent (consultancy) account. Not allowed for tuition |
-| `lookalike_university` | A look-alike of `university`: last two digits swapped, name misspelled "Universty" |
-| `univ_normal_changed` | Same name as `univ_normal`, but its bank details changed after verification |
-| `personal_wallet` | A personal wallet. Not allowed for tuition |
+| id | What it is | Result in Gate 1 |
+|---|---|---|
+| `INV-0002` | Tuition 2025-26 (full year), CNY 22,800 | `INVOICE_ALREADY_PAID` |
+| `INV-0003` | **Tuition 2026-27 (full year), CNY 22,800**: the main tuition story | passes |
+| `INV-0004` | Look-alike: "Sample Universty", account one digit off | `PAYEE_NOT_VERIFIED` |
+| `INV-0005` | "c/o Bright Future": the university's name, the agent's account | `PAYEE_NOT_VERIFIED` |
+| `INV-0006` | An "accounts officer" asks for tuition in his **personal wallet** (from Nura's data) | `PAYEE_NOT_VERIFIED` |
+| `INV-0007` | Lab fee with a hidden "note to assistant" in the memo | passes (memo flagged, ignored) |
+| `INV-0009` | The university "changed bank details" (`claims_new_account`; from Nura's data). The real university has not changed bank | `ACCOUNT_CHANGED`: can be reported for the family's phone check |
+| `INV-0011` | Agent's "seat confirmation fee", "pay today or lose your seat" | `PAYEE_NOT_VERIFIED` |
+| `RENT-2026-11`, `RENT-2026-12` | November and December rent, CNY 1,800 each | passes |
+| `RENT-2026-11B` | November rent with "new bank details" (`claims_new_account`) | `ACCOUNT_CHANGED` |
+| `Q-TM-0042` | Fridge, CNY 3,000 (above the USD 300 bank limit) | passes |
+| `Q-TM-0043` | A second fridge (allowance-reuse story) | passes |
+| `Q-TM-0050` | Washing machine quote that expired on 2026-10-01 | `QUOTE_EXPIRED` (checked at request and again at payment) |
+| `Q-HG-0007` | The same fridge at another shop (wrong-merchant story) | passes |
 
-**Invoices and quotes (`invoices`, 17).** Tuition tranches, rent bills and merchant quotes. Each has an `expected_code`: empty for a good invoice, or the reason code a correct system should give for a bad one. `INV-0003` (CNY 5,700, from the university) is the main tuition demo; `INV-0005` (CNY 3,000, appliance store) is the fridge story.
+Tuition is one invoice per academic year because universities bill a full year (see the technical
+documentation, §3.2). At the sandbox rates and via the cheapest provider (Digital service A, fee and FX
+margin included), CNY 22,800 costs BDT 399,813.88: BDT 186 under the BDT 400,000 per-payment cap. Any
+other provider would go over it.
 
-| Result | Invoices |
-|---|---|
-| Good (should pass) | INV-0002, 0003, 0004, 0005, 0006, 0011, 0014, 0016 |
-| INVOICE_ALREADY_PAID | INV-0001, 0015 |
-| PAYEE_NOT_VERIFIED | INV-0007 (look-alike), 0008 (agent), 0013 (personal wallet) |
-| ACCOUNT_CHANGED | INV-0009 |
-| DOCS_MISSING | INV-0010 |
-| BANK_REVIEW_REJECTED (at the bank step, not Gate 1) | INV-0012 |
-| Attack: hidden instruction in the memo | INV-0017 (the invoice is fine; the memo must be ignored) |
+## Other untrusted text
 
-Each bad invoice has exactly one problem, so a test fails for one reason only.
-
-**Document checklist (`document_checklist`).** Five documents for the sample student. One progress proof is `missing`, which is what `INV-0010` needs.
-
-**Reason-code examples (`reason_code_examples`).** For each reason code in the plan, an example request and the invoice it uses. Some codes need no special invoice (for example `INVOICE_NOT_FOUND` is just an id that does not exist), and some are runtime states made in tests by moving the clock.
-
-**`planner_date_for_runs`.** The fixed date for every evidence run (2026-10-19). All open invoices are due after it.
-
-## Rules for editing this data
-
-- Keep it fictional. Never paste a real account number or a real name.
-- If you change an amount, a payee or a document status, update `expected_code` and the tests that use that invoice. `tests/test_data.py` checks that the two agree.
-- Do not give two beneficiaries the same alias. The message reader picks the first match.
-- Keep the original beneficiaries and balances: the older tests use them.
+Transaction `t16` has a memo with an injection attempt ("IGNORE PREVIOUS INSTRUCTIONS…"). Memos are
+data: they are scanned and reported, never followed and never sent to the AI as instructions.

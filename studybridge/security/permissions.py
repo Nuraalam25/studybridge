@@ -28,10 +28,36 @@ TOOL_TIERS = {
     "compare_remittance": Tier.ADVISE,
     "tuition_plan": Tier.ADVISE,
     "credit_plan": Tier.ADVISE,
+    "payment_status": Tier.READ,
     "convert_currency": Tier.TRANSACT,
-    "send_money": Tier.TRANSACT,
+    "pay": Tier.TRANSACT,
+    "request_allowance": Tier.TRANSACT,
 }
-MONEY_MOVING = {"convert_currency", "send_money"}
+# Intents that move money or start a money approval: both parsers must agree.
+MONEY_MOVING = {"convert_currency", "pay", "request_allowance"}
+
+# Who is acting is a separate idea from the tier. It is set only by the screen
+# or the command line (never by the model or by message text).
+ACTOR_ACTIONS = {
+    "chat": {"student"},
+    "confirm": {"student"},
+    "cancel": {"student"},
+    "acknowledge": {"student"},            # opens the family's approval; starts the 2-minute confirmation
+    "request_limit_raise": {"student"},
+    "submit_account_change": {"student"},
+    "decide": {"family"},
+    "set_limit": {"family"},
+    "set_doc": {"family"},
+    "cancel_allowance": {"family"},          # the student has no cancel button (plan §5.2)
+    # Sandbox operator controls (the person running the demo, from the screen).
+    "set_tier": {"operator"},
+    "advance_clock": {"operator"},
+    "reset": {"operator"},
+}
+
+
+def actor_allowed(actor: str, action: str) -> bool:
+    return actor in ACTOR_ACTIONS.get(action, set())
 
 
 @dataclass

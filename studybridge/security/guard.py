@@ -17,20 +17,34 @@ from decimal import Decimal, InvalidOperation
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _NUM = re.compile(r"(?<![A-Za-z])-?\d[\d,]*(?:\.\d+)?")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
-SMALL_INT_OK = 10          # bare integers up to this are counts/list markers
+SMALL_INT_OK = 10          # bare integers up to this are counts/list markers (never with a currency or label)
 REL_TOL = Decimal("0.005")
 ABS_TOL = Decimal("0.01")
 
 _INJECTION = re.compile(
     r"ignore (all|any|previous|prior|the above)|disregard .*instruction|system prompt|"
     r"you are now|developer mode|\bjailbreak\b|transfer (all|everything)|send (all|everything)|"
-    r"new instruction|act as|override",
+    r"new instruction|act as|override|ignore (your|the|these|my) (rules|instructions|limits)|"
+    r"without (the )?(family )?(approval|confirmation)|skip (the )?(family|approval|confirmation|check)|"
+    r"\bbypass\b|pre-?approved|note to (the )?assistant",
+    re.IGNORECASE,
+)
+
+# Pressure wording typical of consultancy scams. It never changes a decision;
+# it is shown to the student and the family as a warning.
+_PRESSURE = re.compile(
+    r"pay (today|now|immediately)|lose (your|the) (seat|place|admission|offer)|\burgent\b|final (notice|warning)|"
+    r"last chance|act now|within \d+ hours|immediately|or (your|the) (admission|visa|offer) (will be|is) cancel",
     re.IGNORECASE,
 )
 
 
 def looks_like_injection(text: str) -> bool:
     return bool(text) and bool(_INJECTION.search(text))
+
+
+def pressure_signals(text: str) -> list:
+    return sorted({m.group(0).lower() for m in _PRESSURE.finditer(text or "")})
 
 
 def numbers_in(text: str) -> list:
@@ -65,6 +79,7 @@ _CODES = r"(BDT|CNY|USD|THB|EUR|RMB|YUAN|TAKA)"
 _PAIR_BEFORE = re.compile(r"\b" + _CODES + r"\s*" + _NUMTXT, re.IGNORECASE)
 _PAIR_AFTER = re.compile(_NUMTXT + r"\s*" + _CODES + r"\b", re.IGNORECASE)
 _PCT = re.compile(_NUMTXT + r"\s*%")
+_DOLLAR = re.compile(r"\$\s*" + _NUMTXT)
 _PCT_KEY = re.compile(r'"[^"]*pct[^"]*"\s*:\s*"?' + _NUMTXT)
 _CODE_NORM = {"RMB": "CNY", "YUAN": "CNY", "TAKA": "BDT"}
 
@@ -80,12 +95,54 @@ def _pairs(text: str) -> list:
     text = _DATE.sub(" ", text)
     out = [(_CODE_NORM.get(c.upper(), c.upper()), _dec(n)) for c, n in _PAIR_BEFORE.findall(text)]
     out += [(_CODE_NORM.get(c.upper(), c.upper()), _dec(n)) for n, c in _PAIR_AFTER.findall(text)]
+    out += [("USD", _dec(n)) for n in _DOLLAR.findall(text)]
     return out
 
 
 def _close(a: Decimal, b: Decimal) -> bool:
     a, b = abs(a), abs(b)
     return abs(a - b) <= max(ABS_TOL, REL_TOL * b)
+
+
+# Words that say what a number is. A number written next to one of these must sit next to the
+# same word somewhere in the sources ("limit CNY 500" cannot become "balance CNY 500").
+_LABELS = {
+    "balance": r"balances?|holds?",
+    "limit": r"limits?",
+    "remaining": r"left|remaining",
+    "fee": r"fees?",
+    "cap": r"caps?",
+}
+_LABEL_RE = re.compile(r"(?i)\b(" + "|".join(f"(?P<{k}>{v})" for k, v in _LABELS.items()) + r")\b|_(?P<k2>"
+                       + "|".join(_LABELS) + r")\b")
+_IDS = re.compile(r"\b[A-Z]{2,}-[A-Z0-9-]+\b")
+_LABEL_WINDOW = 20
+
+
+def _labelled(text: str) -> list:
+    """(label, number) pairs: each label word with the nearest number within a short window."""
+    text = _IDS.sub(lambda m: " " * len(m.group()), _DATE.sub(lambda m: " " * len(m.group()), text))
+    nums = [(m.start(), m.end(), m.group()) for m in _NUM.finditer(text)]
+    out = []
+    for m in _LABEL_RE.finditer(text):
+        label = m.lastgroup if m.lastgroup != "k2" else m.group("k2").lower()
+        if label not in _LABELS:
+            label = next(k for k in _LABELS if m.group(k))
+        best = None
+        for s, e, tok in nums:
+            gap = s - m.end() if s >= m.end() else m.start() - e
+            between = text[m.end():s] if s >= m.end() else text[e:m.start()]
+            # Never pair across a JSON field or a line: '"limit.", "detail": "CNY 280' is two facts.
+            if '"' in between or "\n" in between:
+                continue
+            if 0 <= gap <= _LABEL_WINDOW and (best is None or gap < best[0]):
+                best = (gap, tok)
+        if best:
+            try:
+                out.append((label, _dec(best[1])))
+            except InvalidOperation:
+                continue
+    return out
 
 
 def enforce_grounding(text: str, sources: list, forbidden: list = ()) -> tuple:
@@ -95,14 +152,20 @@ def enforce_grounding(text: str, sources: list, forbidden: list = ()) -> tuple:
       - a number or ISO date that is not in the sources,
       - a percentage whose value is not a percentage in the sources,
       - an amount labelled with a different currency than in the sources,
-      - a forbidden claim (e.g. 'guaranteed', or a term the tool must not use).
+      - a number next to a label (balance, limit, left, fee, cap) that the sources only
+        attach to other numbers,
+      - a forbidden claim (e.g. 'guaranteed', a status word the outcome does not support, or a
+        term the tool must not use).
+    Known limit: a number with no label nearby, attached to the wrong thing in plain words, can
+    still pass.
     """
-    pool, pool_dates, pool_pairs, pool_pct = [], set(), [], []
+    pool, pool_dates, pool_pairs, pool_pct, pool_labels = [], set(), [], [], []
     for s in sources:
         pool.extend(numbers_in(s))
         pool_dates |= dates_in(s)
         pool_pairs += _pairs(s)
         pool_pct += [_dec(n) for n in _PCT.findall(s)] + [_dec(n) for n in _PCT_KEY.findall(s)]
+        pool_labels += _labelled(s)
     banned = [re.compile(p, re.IGNORECASE) for p in list(ALWAYS_FORBIDDEN) + list(forbidden)]
 
     kept, removed = [], []
@@ -116,6 +179,12 @@ def enforce_grounding(text: str, sources: list, forbidden: list = ()) -> tuple:
             known = {pc for pc, pn in pool_pairs if _close(n, pn)}
             if known and ccy not in known:
                 bad.append(f"{n} {ccy}")
+            elif not any(_close(n, pn) for pn in pool):      # small amounts get no free pass with a currency
+                bad.append(f"{n} {ccy}")
+        for label, n in _labelled(sent):
+            known = [pn for pl, pn in pool_labels if pl == label]
+            if known and not any(_close(n, pn) for pn in known):
+                bad.append(f"{label} {n}")
         bad += [b.pattern for b in banned if b.search(sent)]
         (removed if bad else kept).append(sent.strip())
     return " ".join(kept), removed

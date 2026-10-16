@@ -1,0 +1,467 @@
+{
+  "run_id": "run_20261016_130857_rules",
+  "version": "0.3.0",
+  "clock_start": "2026-10-13T09:00:00",
+  "llm": null,
+  "stories": 31,
+  "stories_as_expected": 31,
+  "outcome_codes": {
+    "ACCOUNT_CHANGED": 4,
+    "ACCOUNT_CHANGE_APPROVED": 1,
+    "ACCOUNT_CHANGE_REQUESTED": 2,
+    "ACCOUNT_ON_HOLD": 1,
+    "ACTOR_NOT_PERMITTED": 2,
+    "ALLOWANCE_APPROVED": 6,
+    "ALLOWANCE_EXPIRED": 1,
+    "ALLOWANCE_MISMATCH": 1,
+    "ALLOWANCE_NEEDED": 2,
+    "ALLOWANCE_REQUESTED": 6,
+    "ALLOWANCE_USED": 1,
+    "AMOUNT_NOT_MATCHING_INVOICE": 1,
+    "APPROVAL_EXPIRED": 1,
+    "AWAITING_FAMILY": 7,
+    "BANK_DAILY_LIMIT_REACHED": 1,
+    "CLARIFY": 2,
+    "CONFIRMATION_INVALID": 1,
+    "DAILY_LIMIT_REACHED": 1,
+    "DOCS_MISSING": 1,
+    "EXECUTED": 11,
+    "INJECTION_DETECTED": 1,
+    "INSUFFICIENT_BALANCE": 1,
+    "INVOICE_ALREADY_PAID": 1,
+    "INVOICE_NOT_FOUND": 1,
+    "INVOICE_REQUIRED": 1,
+    "LIMIT_RAISED": 1,
+    "LIMIT_RAISE_REQUESTED": 1,
+    "MODEL_OUTPUT_INVALID": 1,
+    "OK": 5,
+    "PAYEE_NOT_VERIFIED": 4,
+    "PHONE_CHECK_REQUIRED": 1,
+    "READY_TO_CONFIRM": 11,
+    "REJECTED_BY_FAMILY": 2,
+    "SETTING_CHANGED": 1,
+    "TUITION_APPROVED": 1
+  },
+  "executed": 11,
+  "guard_sentences_cut": 1,
+  "results": [
+    {
+      "story": "A1",
+      "title": "Yearly tuition approved",
+      "group": "Normal payments",
+      "outcome": "CONFIRMATION_INVALID",
+      "expected_outcomes_met": true,
+      "codes": [
+        "AWAITING_FAMILY",
+        "TUITION_APPROVED",
+        "READY_TO_CONFIRM",
+        "EXECUTED",
+        "CONFIRMATION_INVALID"
+      ]
+    },
+    {
+      "story": "A2",
+      "title": "Tuition rejected by the family",
+      "group": "Normal payments",
+      "outcome": "REJECTED_BY_FAMILY",
+      "expected_outcomes_met": true,
+      "codes": [
+        "AWAITING_FAMILY",
+        "REJECTED_BY_FAMILY"
+      ]
+    },
+    {
+      "story": "A3",
+      "title": "Food inside the family limit",
+      "group": "Normal payments",
+      "outcome": "EXECUTED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "READY_TO_CONFIRM",
+        "EXECUTED"
+      ]
+    },
+    {
+      "story": "A4",
+      "title": "QR payment",
+      "group": "Normal payments",
+      "outcome": "EXECUTED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "READY_TO_CONFIRM",
+        "EXECUTED"
+      ]
+    },
+    {
+      "story": "A5",
+      "title": "Rent with a monthly allowance",
+      "group": "Normal payments",
+      "outcome": "EXECUTED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ALLOWANCE_NEEDED",
+        "ALLOWANCE_REQUESTED",
+        "ALLOWANCE_APPROVED",
+        "READY_TO_CONFIRM",
+        "EXECUTED",
+        "OK",
+        "READY_TO_CONFIRM",
+        "EXECUTED"
+      ]
+    },
+    {
+      "story": "A6",
+      "title": "Fridge allowance, full chain",
+      "group": "Normal payments",
+      "outcome": "EXECUTED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ALLOWANCE_REQUESTED",
+        "ALLOWANCE_APPROVED",
+        "OK",
+        "READY_TO_CONFIRM",
+        "EXECUTED"
+      ]
+    },
+    {
+      "story": "A7",
+      "title": "Raise the limit for a birthday",
+      "group": "Normal payments",
+      "outcome": "EXECUTED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "READY_TO_CONFIRM",
+        "EXECUTED",
+        "DAILY_LIMIT_REACHED",
+        "LIMIT_RAISE_REQUESTED",
+        "LIMIT_RAISED",
+        "READY_TO_CONFIRM",
+        "EXECUTED"
+      ]
+    },
+    {
+      "story": "B1",
+      "title": "Agent account on the invoice",
+      "group": "Fraud and blocks",
+      "outcome": "PAYEE_NOT_VERIFIED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "PAYEE_NOT_VERIFIED"
+      ]
+    },
+    {
+      "story": "B2",
+      "title": "Look-alike account",
+      "group": "Fraud and blocks",
+      "outcome": "PAYEE_NOT_VERIFIED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "PAYEE_NOT_VERIFIED"
+      ]
+    },
+    {
+      "story": "B3",
+      "title": "Changed account details",
+      "group": "Fraud and blocks",
+      "outcome": "ACCOUNT_CHANGED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ACCOUNT_CHANGED"
+      ]
+    },
+    {
+      "story": "B4",
+      "title": "Amount not matching the invoice",
+      "group": "Fraud and blocks",
+      "outcome": "AMOUNT_NOT_MATCHING_INVOICE",
+      "expected_outcomes_met": true,
+      "codes": [
+        "AMOUNT_NOT_MATCHING_INVOICE"
+      ]
+    },
+    {
+      "story": "B5",
+      "title": "Duplicate invoice",
+      "group": "Fraud and blocks",
+      "outcome": "INVOICE_ALREADY_PAID",
+      "expected_outcomes_met": true,
+      "codes": [
+        "INVOICE_ALREADY_PAID"
+      ]
+    },
+    {
+      "story": "B6",
+      "title": "'Pay today or lose your seat'",
+      "group": "Fraud and blocks",
+      "outcome": "PAYEE_NOT_VERIFIED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "PAYEE_NOT_VERIFIED"
+      ]
+    },
+    {
+      "story": "B7",
+      "title": "The 'food' label trick",
+      "group": "Fraud and blocks",
+      "outcome": "INVOICE_REQUIRED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "INVOICE_REQUIRED"
+      ]
+    },
+    {
+      "story": "B8",
+      "title": "Personal wallet on a tuition invoice",
+      "group": "Fraud and blocks",
+      "outcome": "PAYEE_NOT_VERIFIED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "PAYEE_NOT_VERIFIED"
+      ]
+    },
+    {
+      "story": "B9",
+      "title": "University 'changed bank details'",
+      "group": "Fraud and blocks",
+      "outcome": "ACCOUNT_CHANGED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ACCOUNT_CHANGED",
+        "ACCOUNT_CHANGE_REQUESTED",
+        "REJECTED_BY_FAMILY",
+        "ACCOUNT_CHANGED"
+      ]
+    },
+    {
+      "story": "C1",
+      "title": "Progress proof missing",
+      "group": "Documents and approvals",
+      "outcome": "AWAITING_FAMILY",
+      "expected_outcomes_met": true,
+      "codes": [
+        "DOCS_MISSING",
+        "SETTING_CHANGED",
+        "AWAITING_FAMILY"
+      ]
+    },
+    {
+      "story": "C2",
+      "title": "Invoice not found",
+      "group": "Documents and approvals",
+      "outcome": "INVOICE_NOT_FOUND",
+      "expected_outcomes_met": true,
+      "codes": [
+        "INVOICE_NOT_FOUND"
+      ]
+    },
+    {
+      "story": "C3",
+      "title": "Family approval expired",
+      "group": "Documents and approvals",
+      "outcome": "APPROVAL_EXPIRED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "AWAITING_FAMILY",
+        "OK",
+        "APPROVAL_EXPIRED"
+      ]
+    },
+    {
+      "story": "C4",
+      "title": "Allowance expired",
+      "group": "Documents and approvals",
+      "outcome": "ALLOWANCE_EXPIRED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ALLOWANCE_REQUESTED",
+        "ALLOWANCE_APPROVED",
+        "OK",
+        "ALLOWANCE_EXPIRED"
+      ]
+    },
+    {
+      "story": "C5",
+      "title": "Wrong merchant for an allowance",
+      "group": "Documents and approvals",
+      "outcome": "ALLOWANCE_MISMATCH",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ALLOWANCE_REQUESTED",
+        "ALLOWANCE_APPROVED",
+        "ALLOWANCE_MISMATCH"
+      ]
+    },
+    {
+      "story": "C6",
+      "title": "New bank details checked by phone",
+      "group": "Documents and approvals",
+      "outcome": "ALLOWANCE_NEEDED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ACCOUNT_CHANGED",
+        "ACCOUNT_CHANGE_REQUESTED",
+        "PHONE_CHECK_REQUIRED",
+        "ACCOUNT_CHANGE_APPROVED",
+        "ACCOUNT_ON_HOLD",
+        "OK",
+        "ALLOWANCE_NEEDED"
+      ]
+    },
+    {
+      "story": "D1",
+      "title": "Instruction hidden in an invoice",
+      "group": "Attacks",
+      "outcome": "AWAITING_FAMILY",
+      "expected_outcomes_met": true,
+      "codes": [
+        "AWAITING_FAMILY"
+      ]
+    },
+    {
+      "story": "D2",
+      "title": "'Ignore your rules'",
+      "group": "Attacks",
+      "outcome": "INJECTION_DETECTED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "INJECTION_DETECTED"
+      ]
+    },
+    {
+      "story": "D3",
+      "title": "Student tries to approve as family",
+      "group": "Attacks",
+      "outcome": "ACTOR_NOT_PERMITTED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "AWAITING_FAMILY",
+        "ACTOR_NOT_PERMITTED",
+        "ACTOR_NOT_PERMITTED"
+      ]
+    },
+    {
+      "story": "D4",
+      "title": "Allowance reused",
+      "group": "Attacks",
+      "outcome": "ALLOWANCE_USED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ALLOWANCE_REQUESTED",
+        "ALLOWANCE_APPROVED",
+        "READY_TO_CONFIRM",
+        "EXECUTED",
+        "ALLOWANCE_USED"
+      ]
+    },
+    {
+      "story": "D5",
+      "title": "Badly formed AI output",
+      "group": "Attacks",
+      "outcome": "MODEL_OUTPUT_INVALID",
+      "expected_outcomes_met": true,
+      "codes": [
+        "MODEL_OUTPUT_INVALID"
+      ]
+    },
+    {
+      "story": "D6",
+      "title": "The two readers disagree",
+      "group": "Attacks",
+      "outcome": "AWAITING_FAMILY",
+      "expected_outcomes_met": true,
+      "codes": [
+        "CLARIFY",
+        "AWAITING_FAMILY"
+      ]
+    },
+    {
+      "story": "E1",
+      "title": "Insufficient balance",
+      "group": "Edge cases",
+      "outcome": "INSUFFICIENT_BALANCE",
+      "expected_outcomes_met": true,
+      "codes": [
+        "INSUFFICIENT_BALANCE"
+      ]
+    },
+    {
+      "story": "E2",
+      "title": "Unclear request",
+      "group": "Edge cases",
+      "outcome": "CLARIFY",
+      "expected_outcomes_met": true,
+      "codes": [
+        "CLARIFY"
+      ]
+    },
+    {
+      "story": "E3",
+      "title": "Daily bank limit",
+      "group": "Edge cases",
+      "outcome": "BANK_DAILY_LIMIT_REACHED",
+      "expected_outcomes_met": true,
+      "codes": [
+        "ALLOWANCE_REQUESTED",
+        "ALLOWANCE_APPROVED",
+        "READY_TO_CONFIRM",
+        "EXECUTED",
+        "READY_TO_CONFIRM",
+        "EXECUTED",
+        "BANK_DAILY_LIMIT_REACHED"
+      ]
+    }
+  ],
+  "info_requests": [
+    {
+      "request": "compare the cheapest way to send 50000 BDT to CNY within 1 day",
+      "expected_intent": "compare_remittance",
+      "intent": "compare_remittance",
+      "code": "OK",
+      "as_expected": true
+    },
+    {
+      "request": "plan my tuition payment",
+      "expected_intent": "tuition_plan",
+      "intent": "tuition_plan",
+      "code": "OK",
+      "as_expected": true
+    },
+    {
+      "request": "how can I build my credit history",
+      "expected_intent": "credit_plan",
+      "intent": "credit_plan",
+      "code": "OK",
+      "as_expected": true
+    },
+    {
+      "request": "show my spending insights",
+      "expected_intent": "spending_insights",
+      "intent": "spending_insights",
+      "code": "OK",
+      "as_expected": true
+    },
+    {
+      "request": "show my wallet balance",
+      "expected_intent": "wallet_overview",
+      "intent": "wallet_overview",
+      "code": "OK",
+      "as_expected": true
+    }
+  ],
+  "info_requests_as_expected": 5,
+  "audit_head": {
+    "records": 370,
+    "head_hash": "e4f4098805708058f7a7b4bd4122bf239ac64a7abf7e4310f45c2891a658b82c"
+  },
+  "audit_verification": {
+    "ok": true,
+    "records": 370,
+    "broken_at": null
+  },
+  "tamper_test_on_copy": {
+    "ok": false,
+    "records": 12,
+    "broken_at": 12
+  },
+  "python": "3.13.16"
+}

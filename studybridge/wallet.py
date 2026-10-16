@@ -5,7 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from .fx import quote
+from .config import HOME_CURRENCY
+from .fx import cost_to_deliver, quote
 from .money import D, convert_mid, norm_ccy, q
 from .remittance import evaluate, provider_by_id
 from .security.audit import mask_account
@@ -20,7 +21,8 @@ class SandboxWallet:
         self.profile = copy.deepcopy(profile)
         self.owner = profile["owner"]
         self.balances = {norm_ccy(c): D(v) for c, v in profile["balances"].items()}
-        self.beneficiaries = {b["id"]: b for b in profile.get("beneficiaries", [])}
+        # Saved payees (plan v2). Older profiles call them "beneficiaries".
+        self.beneficiaries = {b["id"]: b for b in profile.get("payees", profile.get("beneficiaries", []))}
         self.transactions = list(profile.get("transactions", []))
         self._processed = {}
 
@@ -38,8 +40,8 @@ class SandboxWallet:
             "total_value_home": q(self.total_value(home)),
             "home_currency": home,
             "beneficiaries": [
-                {"id": b["id"], "name": b["name"], "currency": b["currency"],
-                 "account": mask_account(b["account_number"])}
+                {"id": b["id"], "name": b["name"], "currency": b["currency"], "type": b.get("type"),
+                 "account": mask_account(b["account_number"]) if b.get("account_number") else None}
                 for b in self.beneficiaries.values()
             ],
         }
@@ -78,5 +80,21 @@ class SandboxWallet:
                "fee": opt["fee"], "recipient_gets": opt["recipient_gets"],
                "recipient_currency": b["currency"], "status": "SANDBOX_SETTLED",
                "sandbox_reference": "SBX-" + idempotency_key[:10].upper()}
+        self._processed[idempotency_key] = rec
+        return rec
+
+    def card_pay(self, payee_id: str, amount, ccy: str, idempotency_key: str) -> dict:
+        """Everyday payment with the family-funded international card (debits BDT)."""
+        if idempotency_key in self._processed:
+            return {**self._processed[idempotency_key], "replayed": True}
+        b = self.beneficiaries.get(payee_id)
+        if b is None:
+            raise WalletError("payee is not in the saved list")
+        cost = cost_to_deliver(amount, HOME_CURRENCY, ccy)
+        self._debit(HOME_CURRENCY, cost)
+        rec = {"type": "card", "at": datetime.now().isoformat(timespec="seconds"),
+               "payee": b["name"], "account": mask_account(b["account_number"]) if b.get("account_number") else None,
+               "paid": q(amount), "paid_currency": norm_ccy(ccy), "debited": cost, "debit_currency": HOME_CURRENCY,
+               "status": "SANDBOX_SETTLED", "sandbox_reference": "SBX-" + idempotency_key[:10].upper()}
         self._processed[idempotency_key] = rec
         return rec
