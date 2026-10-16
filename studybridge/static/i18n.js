@@ -15,6 +15,7 @@ window.I18N = {
     acct: "New bank account", called: "I called them on the number on file (not a number on the bill)",
     phone: "Number on file", hold: "After you approve, a 24-hour wait follows before it can be paid.",
     raisedToday: "raised for today",
+    cancelAsked: "Student asks to cancel", cancelAskedReq: "The student asks you to cancel this request. Reject it to cancel.",
   },
   bn: {
     where: "ঢাকা · পরিবার (টাকা পাঠান)", inbox: "অনুমোদনের তালিকা", limit: "দৈনিক সীমা", docs: "কাগজপত্র",
@@ -30,5 +31,6 @@ window.I18N = {
     acct: "নতুন ব্যাংক অ্যাকাউন্ট", called: "আমি আগে থেকে সংরক্ষিত নম্বরে ফোন করে নিশ্চিত হয়েছি (বিলের নম্বরে নয়)",
     phone: "সংরক্ষিত নম্বর", hold: "অনুমোদনের পর ২৪ ঘণ্টা অপেক্ষার পরেই টাকা পাঠানো যাবে।",
     raisedToday: "আজকের জন্য বাড়ানো",
+    cancelAsked: "শিক্ষার্থী বাতিল করতে বলেছে", cancelAskedReq: "শিক্ষার্থী এই অনুরোধটি বাতিল করতে বলেছে। বাতিল করতে প্রত্যাখ্যান করুন।",
   },
 };

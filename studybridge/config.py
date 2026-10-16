@@ -20,7 +20,7 @@ CURRENCY_ALIASES = {
 # Units of each currency per 1 USD (sandbox mid-market snapshot).
 MID_PER_USD = {
     "USD": D("1"),
-    "BDT": D("123.39"),
+    "BDT": D("134.90"),
     "CNY": D("7.10"),
     "THB": D("33.20"),
     "EUR": D("0.86"),
@@ -61,7 +61,7 @@ PROVIDERS = [
 
 # Money-movement guardrails, expressed in HOME_CURRENCY.
 LIMITS = {
-    "per_tx_home": D("400000"),
+    "per_tx_home": D("450000"),
     "daily_home": D("600000"),
 }
 CONFIRM_TTL_SECONDS = 120          # the student's final confirmation: 2 minutes, single use

@@ -4,153 +4,207 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StudyBridge</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <div class="logo" aria-hidden="true">SB</div>
+    <div class="brand floating">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="15" fill="#1F6BFF"></rect>
+        <path d="M19 47 C45 47, 45 32, 32 32 C19 32, 19 17, 45 17" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"></path>
+        <circle cx="19" cy="47" r="4.5" fill="#fff"></circle><circle cx="45" cy="17" r="6" fill="#fff"></circle><circle cx="45" cy="17" r="2.4" fill="#1F6BFF"></circle>
+      </svg>
       <div>
         <h1>StudyBridge</h1>
-        <p class="tagline">AI suggests · code decides · the student confirms last <span class="badge">SANDBOX · no real money</span></p>
+        <p>Sandbox · no real money</p>
       </div>
     </div>
-    <div class="controls" aria-label="Demo controls">
-      <div class="clock" title="Sandbox clock: approval windows and expiries read this clock">
-        <span class="clock-label">Sandbox time</span>
-        <span id="clock">—</span>
-        <button type="button" class="chip" data-advance="1">+1 h</button>
-        <button type="button" class="chip" data-advance="25">+25 h</button>
-        <button type="button" class="chip" data-advance="73">+73 h</button>
-      </div>
-      <label class="tier">Tier
-        <select id="tier" aria-label="Permission tier">
-          <option>PUBLIC</option><option>READ</option><option>ADVISE</option><option>TRANSACT</option>
-        </select>
-      </label>
-      <span id="llm" class="chip status-chip">Qwen: —</span>
-      <button type="button" id="open-stories" class="primary">▶ Stories</button>
-      <button type="button" id="reset" class="ghost">Reset</button>
-    </div>
+
+    <nav class="toolbar floating" aria-label="Demo controls">
+      <button type="button" class="tool" id="clock-btn" popovertarget="clock-pop" title="Sandbox time: approvals and expiries follow this clock">
+        <span class="ic" data-icon="clock"></span><span id="clock">—</span>
+      </button>
+      <button type="button" class="tool" id="perm-btn" popovertarget="perm-pop" title="What the assistant is allowed to do">
+        <span class="ic" data-icon="lock"></span><span id="perm-label">Assistant can: —</span>
+      </button>
+      <button type="button" class="tool" id="llm" aria-pressed="false" title="Switch Qwen on or off. Off means rules-only mode.">
+        <span class="ic" data-icon="spark"></span><span id="llm-label">Qwen: —</span>
+      </button>
+      <button type="button" class="tool" id="open-stories">
+        <span class="ic" data-icon="play"></span><span>Play stories</span>
+      </button>
+      <button type="button" class="tool" id="theme" aria-pressed="false" title="Switch between light and dark">
+        <span class="ic" data-icon="moon"></span><span id="theme-label">Dark</span>
+      </button>
+      <button type="button" class="tool" id="reset">
+        <span class="ic" data-icon="reset"></span><span>Reset</span>
+      </button>
+    </nav>
   </header>
 
-  <div id="caption" class="caption" hidden aria-live="polite">
+  <div id="clock-pop" class="pop" popover>
+    <p class="pop-title">Move the sandbox clock forward</p>
+    <p class="pop-note">Approvals last 24 hours, allowances 72 hours. Jump ahead to see them expire.</p>
+    <div class="row">
+      <button type="button" class="btn" data-advance="1">+1 hour</button>
+      <button type="button" class="btn" data-advance="25">+25 hours</button>
+      <button type="button" class="btn" data-advance="73">+73 hours</button>
+    </div>
+  </div>
+
+  <div id="perm-pop" class="pop perm" popover>
+    <p class="pop-title">What the assistant can do</p>
+    <p class="pop-note">Like app permissions on a phone: the assistant only gets the access chosen here. Even if a message tricks it, it cannot go further.</p>
+    <div id="perm-list" class="perm-list" role="radiogroup" aria-label="Assistant permission"></div>
+  </div>
+
+  <div id="caption" class="caption floating" hidden aria-live="polite">
     <div class="caption-main">
       <span id="cap-story" class="cap-story"></span>
       <span id="cap-text"></span>
     </div>
     <div class="caption-side">
       <span id="cap-progress"></span>
-      <button type="button" id="cap-pause" class="chip">Pause</button>
-      <button type="button" id="cap-stop" class="chip">Stop</button>
+      <button type="button" id="cap-pause" class="btn small">Pause</button>
+      <button type="button" id="cap-stop" class="btn small">Stop</button>
     </div>
   </div>
 
-  <nav class="tabs" aria-label="Screens">
+  <nav class="tabs floating" aria-label="Screens">
     <button type="button" data-tab="student" class="active">Student</button>
     <button type="button" data-tab="glass">Glass Box</button>
     <button type="button" data-tab="family">Family</button>
   </nav>
 
   <main class="stage">
-    <!-- STUDENT PHONE -->
-    <section class="phone student" id="pane-student" aria-label="Student phone">
-      <div class="phone-bar">
-        <div><strong id="owner">Student</strong><span class="where">Shenzhen · student</span></div>
-        <span class="role-lock" title="The actor is set by this screen, never by chat text or the AI">role: student 🔒</span>
+    <!-- STUDENT PHONE: Home, Bills and Assistant tabs -->
+    <section class="sheet student" id="pane-student" aria-label="Student phone">
+      <div class="sheet-head">
+        <div class="who"><span class="avatar student-bg" data-icon="person"></span>
+          <div><strong id="owner">Student</strong><span class="where">Shenzhen · student phone</span></div>
+        </div>
       </div>
-      <div class="wallet-card">
-        <div class="wc-label">Family-funded wallet</div>
-        <div id="wc-main" class="wc-main">—</div>
-        <div id="wc-sub" class="wc-sub"></div>
+
+      <div class="sheet-body spane on" id="s-home" data-spane="home">
+        <div class="wallet">
+          <span class="wallet-label">Family-funded wallet</span>
+          <div id="wc-main" class="wallet-main">—</div>
+          <div id="wc-sub" class="wallet-sub"></div>
+        </div>
+        <div class="card-flat">
+          <h4>Exchange rates</h4>
+          <div id="home-rates" class="kv"></div>
+        </div>
+        <div class="card-flat">
+          <h4>Today</h4>
+          <div id="home-limits" class="limits"></div>
+        </div>
+        <div>
+          <h4>Ask the assistant</h4>
+          <div id="quick" class="quick"></div>
+          <div id="more-quick" class="more-quick" hidden></div>
+        </div>
+        <div id="mine" class="mine" aria-label="My allowances"></div>
+        <div class="card-flat">
+          <h4>Recent activity</h4>
+          <ul id="activity" class="activity"></ul>
+        </div>
       </div>
+
+      <div class="sheet-body spane" id="s-bills" data-spane="bills">
+        <p class="muted small">Bills and quotes you have received. The app pays only the account saved for each payee.</p>
+        <div id="bills" class="bills"></div>
+      </div>
+
+      <div class="sheet-body spane" id="student-body" data-spane="assistant">
+        <div id="thread" class="thread" aria-live="polite"></div>
+      </div>
+
       <div id="confirms" class="confirms" aria-live="polite"></div>
-      <div id="thread" class="thread" aria-live="polite"></div>
-      <div id="quick" class="quick" aria-label="Example requests"></div>
-      <div class="row tools"><button type="button" id="open-raise" class="chip">Ask to raise my limit</button></div>
-      <form id="form" class="composer">
-        <input id="msg" autocomplete="off" maxlength="1000" placeholder="e.g. pay invoice INV-0003" aria-label="Message to the assistant">
-        <button type="submit" class="primary">Send</button>
+      <form id="form" class="composer" hidden>
+        <input id="msg" autocomplete="off" maxlength="1000" placeholder="Ask, e.g. pay invoice INV-0003" aria-label="Message to the assistant">
+        <button type="submit" class="send" aria-label="Send"><span data-icon="send"></span></button>
       </form>
+      <nav class="tabbar" aria-label="Student screens">
+        <button type="button" data-stab="home" class="on"><span data-icon="home"></span>Home</button>
+        <button type="button" data-stab="bills"><span data-icon="bill"></span>Bills</button>
+        <button type="button" data-stab="assistant"><span data-icon="chat"></span>Assistant</button>
+      </nav>
     </section>
 
     <!-- GLASS BOX -->
     <section class="glass" id="pane-glass" aria-label="Glass Box">
-      <div class="glass-head">
-        <div>
-          <h2>Glass Box</h2>
-          <p class="muted">Every step of the case as it runs. Colours show who acts.</p>
-        </div>
-        <select id="case-select" aria-label="Choose a case"></select>
-      </div>
-      <div class="legend">
-        <span class="lg lg-student">Student</span><span class="lg lg-qwen">Qwen (language only)</span>
-        <span class="lg lg-code">Code (decides)</span><span class="lg lg-bank">Simulated bank</span><span class="lg lg-family">Family</span>
-      </div>
-      <div id="case-title" class="case-title"></div>
-      <div id="pipeline" class="pipeline"></div>
-
-      <div class="grid2">
-        <div class="card">
-          <h3>Gate 1 checks</h3>
-          <ul id="checks" class="checks"><li class="muted">Send a payment request to see the checks.</li></ul>
-        </div>
-        <div class="card">
-          <h3>What the AI saw</h3>
-          <div id="ai" class="ai"><p class="muted">No request yet.</p></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Limits today</h3>
-        <div id="meters" class="meters"></div>
-      </div>
-
-      <div class="card">
-        <div class="row-between">
-          <h3>Audit chain <span class="muted small">hash-chained, account numbers masked</span></h3>
-          <div class="row">
-            <button type="button" id="verify" class="chip">Verify chain</button>
-            <button type="button" id="tamper" class="chip danger">Tamper test (on a copy)</button>
+      <div class="route-card floating">
+        <div class="route-top">
+          <div>
+            <h2>Glass Box</h2>
+            <p class="muted">How the latest request travelled, stop by stop.</p>
           </div>
+          <select id="case-select" aria-label="Choose a request" hidden></select>
         </div>
-        <div id="verify-result" class="verify-result"></div>
-        <div id="chain" class="chain"></div>
+        <div id="case-title" class="route-head"></div>
+        <ol id="pipeline" class="route"></ol>
+      </div>
+
+      <div class="details floating">
+        <div class="seg" role="tablist" aria-label="Details">
+          <button type="button" role="tab" data-detail="checks" class="on">Safety checks</button>
+          <button type="button" role="tab" data-detail="ai">What the AI saw</button>
+          <button type="button" role="tab" data-detail="limits">Limits and rates</button>
+          <button type="button" role="tab" data-detail="audit">Audit log</button>
+        </div>
+        <div class="detail-pane on" data-pane="checks"><ul id="checks" class="checks"></ul></div>
+        <div class="detail-pane" data-pane="ai"><div id="ai" class="ai"></div></div>
+        <div class="detail-pane" data-pane="limits">
+          <div id="meters" class="meters"></div>
+          <div id="rates" class="rates"></div>
+        </div>
+        <div class="detail-pane" data-pane="audit">
+          <p class="muted">Each record holds the fingerprint of the one before it, so changing any line breaks the chain. Account numbers are masked.</p>
+          <div class="row">
+            <button type="button" id="verify" class="btn">Check the chain</button>
+            <button type="button" id="tamper" class="btn danger">Tamper with a copy</button>
+          </div>
+          <div id="verify-result" class="verify-result"></div>
+          <div id="chain" class="chain"></div>
+        </div>
       </div>
     </section>
 
     <!-- FAMILY PHONE -->
-    <section class="phone family" id="pane-family" aria-label="Family phone">
-      <div class="phone-bar">
-        <div><strong id="fam-name">Family</strong><span class="where" data-i18n="where">Dhaka · family sender</span></div>
-        <button type="button" id="lang" class="chip" aria-label="Switch language">বাংলা</button>
+    <section class="sheet family" id="pane-family" aria-label="Family phone">
+      <div class="sheet-head">
+        <div class="who"><span class="avatar family-bg" data-icon="home"></span>
+          <div><strong id="fam-name">Family</strong><span class="where" data-i18n="where">Dhaka · family sender</span></div>
+        </div>
+        <button type="button" id="lang" class="btn small" aria-label="Switch language">বাংলা</button>
       </div>
-      <div class="fam-scroll">
-        <h3><span data-i18n="inbox">Approval inbox</span> <span id="inbox-count" class="count"></span></h3>
+      <div class="sheet-body">
+        <h3 class="sec"><span data-i18n="inbox">Approval inbox</span> <span id="inbox-count" class="count"></span></h3>
         <div id="inbox" class="inbox"></div>
 
-        <div class="card soft">
+        <div class="group">
           <div class="row-between">
             <span data-i18n="limit">Daily limit</span>
             <strong id="limit-val">CNY 500</strong>
           </div>
           <input type="range" id="limit" min="500" max="1000" step="50" aria-label="Family daily limit (CNY)">
-          <div class="row-between small muted"><span>CNY 500</span><span>CNY 1,000</span></div>
-          <div class="meter"><div id="fam-meter" class="meter-fill family-fill"></div></div>
+          <div class="bar"><div id="fam-meter" class="bar-fill family-fill"></div></div>
           <div id="fam-spent" class="small muted"></div>
         </div>
 
-        <div class="card soft">
+        <div class="group">
           <h4 data-i18n="docs">Documents</h4>
-          <ul id="docs" class="docs"></ul>
+          <ul id="docs" class="list"></ul>
         </div>
 
-        <div class="card soft">
+        <div class="group">
           <h4 data-i18n="allowances">Open allowances</h4>
           <ul id="allowances" class="list"></ul>
         </div>
 
-        <div class="card soft">
+        <div class="group">
           <h4 data-i18n="history">History</h4>
           <ul id="history" class="list small"></ul>
         </div>
@@ -169,8 +223,8 @@
         <label class="small">Speed
           <select id="speed"><option value="2600">Presenter</option><option value="1400" selected>Normal</option><option value="500">Fast</option></select>
         </label>
-        <button type="button" id="play-all" class="primary">▶ Play all</button>
-        <button type="button" id="close-stories" class="ghost" aria-label="Close">✕</button>
+        <button type="button" id="play-all" class="btn primary">Play all</button>
+        <button type="button" id="close-stories" class="btn" aria-label="Close">Close</button>
       </div>
     </div>
     <div id="story-list" class="story-list"></div>
@@ -191,8 +245,8 @@
       </label>
       <p class="small muted">Your family sees your note exactly as you write it. It never changes a rule by itself.</p>
       <div class="row">
-        <button type="submit" class="primary">Send to my family</button>
-        <button type="button" id="raise-cancel" class="ghost">Cancel</button>
+        <button type="submit" class="btn primary">Send to my family</button>
+        <button type="button" id="raise-cancel" class="btn">Cancel</button>
       </div>
     </form>
   </dialog>

@@ -21,7 +21,7 @@ class TestFx(unittest.TestCase):
     def test_spread_applied(self):
         qt = fx.quote(10000, "BDT", "CNY")
         self.assertLess(qt["applied_rate"], qt["mid_rate"])
-        self.assertEqual(qt["you_get"], D("573.11"))
+        self.assertEqual(qt["you_get"], D("524.21"))
 
     def test_rejects_non_positive(self):
         with self.assertRaises(ValueError):
@@ -67,7 +67,7 @@ class TestTuition(unittest.TestCase):
         self.assertEqual(len(res["invoices"]), 1)
         row = res["invoices"][0]
         self.assertEqual(row["amount"], D("22800.00"))
-        self.assertEqual(row["send_amount"], D("399813.88"))     # just under the BDT 400,000 per-payment cap
+        self.assertEqual(row["send_amount"], D("437109.10"))     # under the BDT 450,000 per-payment cap
         self.assertEqual(row["send_by"], "2026-11-11")           # due - 3 safety days - 1 delivery day
 
     def test_funding_gap(self):

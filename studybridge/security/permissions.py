@@ -49,8 +49,10 @@ ACTOR_ACTIONS = {
     "set_limit": {"family"},
     "set_doc": {"family"},
     "cancel_allowance": {"family"},          # the student has no cancel button (plan §5.2)
+    "ask_cancel": {"student"},               # ...but can ask the family to cancel
     # Sandbox operator controls (the person running the demo, from the screen).
     "set_tier": {"operator"},
+    "set_llm": {"operator"},
     "advance_clock": {"operator"},
     "reset": {"operator"},
 }

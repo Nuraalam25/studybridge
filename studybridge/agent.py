@@ -1,4 +1,4 @@
-"""StudyBridge agent: the agentic workflow of plan v3.
+"""StudyBridge agent: the agentic workflow of plan v4.
 
 "Agentic" means the model takes part in a workflow whose steps are fixed in
 code. Step numbers match the plan:
@@ -33,14 +33,15 @@ from decimal import Decimal
 
 from . import budget, credit, fx, remittance, tuition
 from .clock import SandboxClock
-from .config import CONFIRM_TTL_SECONDS, CURRENCY_ALIASES, EXEMPT_TYPES, HOME_CURRENCY, LIMITS, PAYMENT
+from .config import (CONFIRM_TTL_SECONDS, CURRENCY_ALIASES, EXEMPT_TYPES, HOME_CURRENCY, LIMITS, PAYMENT,
+                     RATE_SOURCE, WALLET_FX_SPREAD)
 from .llm import LLMError
 from .money import D, convert_mid, fmt, mid_rate, norm_ccy, q, to_usd
 from .payments import DOC_ID, PaymentBook
 from .reasons import PaymentBlocked, fix as fix_for, meaning
 from .security.audit import AuditLog, mask_account
 from .security.guard import amount_grounded_in, enforce_grounding, looks_like_injection, pressure_signals
-from .security.permissions import ACTOR_ACTIONS, MONEY_MOVING, PolicyEngine, Session, Tier, actor_allowed
+from .security.permissions import ACTOR_ACTIONS, MONEY_MOVING, TOOL_TIERS, PolicyEngine, Session, Tier, actor_allowed
 from .wallet import SandboxWallet, WalletError
 
 INTENTS = ["help", "wallet_overview", "fx_quote", "compare_remittance", "tuition_plan", "credit_plan",
@@ -123,10 +124,11 @@ def llm_view(obj):
     return obj
 
 
-# The workflow steps shown in the Glass Box (key, who acts, title).
+# Fix step shown when the family already rejected a reported new account for the same bill.
 REJECTED_CHANGE_FIX = ("The family rejected the earlier report. Do not pay this bill; ask the payee to confirm "
                        "its bank details with the family by phone on the number already on file.")
 
+# The workflow steps shown in the Glass Box (key, who acts, title).
 PIPELINE = [
     ("1", "student", "Request logged"),
     ("2", "qwen", "Read the request (Qwen + rules reader must agree)"),
@@ -220,7 +222,8 @@ class StudentFinanceAgent:
     def _finish(self, case, resp: AgentResponse) -> AgentResponse:
         if case is not None:
             resp.case_id = case["id"]
-            case["outcome"] = resp.code
+            case["outcome"], case["fix"] = resp.code, resp.fix
+            case["why"] = meaning(resp.code) if resp.blocked else None
         return resp
 
     # ------------------------------------------------------------ parsing
@@ -413,8 +416,11 @@ class StudentFinanceAgent:
         self.audit.append("policy_decision", {"tool": intent, "allowed": decision.allowed, "reason": decision.reason})
         if not decision.allowed:
             code = "TIER_TOO_LOW" if "needs tier" in decision.reason else "TOOL_ERROR"
-            return self._refuse(case, intent, code, f"Not permitted: {decision.reason}.", message,
+            resp = self._refuse(case, intent, code, f"Not permitted: {decision.reason}.", message,
                                 step="2", source=source)
+            if code == "TIER_TOO_LOW":
+                resp.data["needs_tier"] = TOOL_TIERS[intent].name     # lets the screen offer that permission
+            return resp
 
         try:
             resp = getattr(self, "_do_" + intent)(args, message, case)
@@ -1139,6 +1145,23 @@ class StudentFinanceAgent:
         self.audit.append("allowance_cancelled", {"allowance": a["id"], "actor": actor})
         return AgentResponse(f"Allowance {a['id']} cancelled by the {actor}.", "cancel_allowance", code="CANCELLED")
 
+    def ask_cancel(self, item_id: str, actor: str) -> AgentResponse:
+        """The student cannot cancel an allowance (plan §5.2), but can ask the family to."""
+        if not actor_allowed(actor, "ask_cancel"):
+            return self._actor_refused(actor, "ask_cancel")
+        try:
+            item = self.book.ask_cancel(item_id)
+        except PaymentBlocked as b:
+            return self._blocked_action("ask_cancel", b.code, b.detail)
+        fam = self.book.family_name
+        self.audit.append("cancel_asked", {"id": item["id"], "actor": actor})
+        self._note(self.cases.get(item.get("case_id")), f"The student asked the {fam} to cancel {item['id']}.")
+        what = (f"allowance {item['id']}" if item["id"].startswith("ALW-") else f"allowance request {item['id']}")
+        return AgentResponse(f"CANCEL ASKED · The {fam} has been asked to cancel {what} "
+                             f"({fmt(item['amount'], item['currency'])}, {item['payee_name']}). "
+                             "Only the family can cancel it; until they do, nothing changes.", "ask_cancel",
+                             code="CANCEL_ASKED")
+
     # ------------------------------------------------------------ steps 9-10: confirm and execute
     def _recheck_payment(self, op: dict) -> int:
         amount = D(op["amount"])
@@ -1245,6 +1268,12 @@ class StudentFinanceAgent:
             "tier": self.session.granted_tier.name,
             "llm": getattr(self.llm, "model", None) if self.llm else None,
             "wallet": self.wallet.overview(HOME_CURRENCY),
+            # For the student's Home screen: payments made in this sandbox, then the sample history.
+            "payments": [r for r in self.wallet._processed.values() if r.get("type") in ("send", "card")][::-1],
+            "activity": self.wallet.transactions[-6:][::-1],
+            "rates": {"BDT_per_CNY": q(mid_rate("CNY", "BDT")), "CNY_per_USD": q(mid_rate("USD", "CNY")),
+                      "BDT_per_USD": q(mid_rate("USD", "BDT")), "spread_pct": q(WALLET_FX_SPREAD * 100),
+                      "source": RATE_SOURCE},
             "book": book,
             "hard_caps": {"per_tx_home": LIMITS["per_tx_home"], "daily_home": LIMITS["daily_home"],
                           "spent_today_home": q(self.session.spent_today_home)

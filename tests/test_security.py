@@ -48,7 +48,7 @@ class TestPermissions(unittest.TestCase):
 
     def test_limits(self):
         pe, s = PolicyEngine(), Session(Tier.TRANSACT)
-        self.assertFalse(pe.check_amount(D("400001"), s, TODAY).allowed)
+        self.assertFalse(pe.check_amount(D("450001"), s, TODAY).allowed)
         s.spent_today_home = D("550000")
         self.assertFalse(pe.check_amount(D("60000"), s, TODAY).allowed)
         self.assertTrue(pe.check_amount(D("60000"), s, date(2026, 10, 14)).allowed)  # new day resets
@@ -150,11 +150,11 @@ class TestLLMHardening(unittest.TestCase):
     def test_guard_cuts_invented_number(self):
         llm = FakeLLM({"intent": "fx_quote", "amount": 10000, "from_currency": "BDT", "to_currency": "CNY",
                        "deadline_days": None, "payee": None, "invoice_id": None},
-                      text="You would receive CNY 573.11. That is a 7.5% saving versus banks.")
+                      text="You would receive CNY 524.21. That is a 7.5% saving versus banks.")
         r = make_agent(llm=llm).handle("how much is 10000 BDT in CNY")
         self.assertEqual(len(r.guard_removed), 1)
         self.assertIn("7.5%", r.guard_removed[0])
-        self.assertIn("573.11", r.text)
+        self.assertIn("524.21", r.text)
 
 
 class TestGuardUnit(unittest.TestCase):

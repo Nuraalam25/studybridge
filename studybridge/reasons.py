@@ -53,7 +53,7 @@ REASONS = {
     "ALLOWANCE_NOT_FOR_TUITION": ("Tuition never uses an allowance.", "Pay the tuition invoice instead."),
     "ALLOWANCE_NOT_NEEDED": ("This payment fits inside today's family daily limit.", "Pay it directly."),
     "ALLOWANCE_LIMIT_REACHED": ("Three allowances are already open or waiting.",
-                                "Use or cancel an open allowance first."),
+                                "Use an open allowance first, or ask the family to cancel one."),
     "APPROVAL_EXPIRED": ("The family approval window has passed.", "Request again."),
     # Existing guardrails
     "ABOVE_HARD_CAP": ("The payment is above the BDT per-payment or daily hard cap.", "Lower or wait."),
@@ -63,8 +63,8 @@ REASONS = {
                            "State a plain request, e.g. 'pay invoice INV-0003'."),
     "ACTOR_NOT_PERMITTED": ("This role cannot perform this action.",
                             "The right person must do it from their own screen."),
-    "TIER_TOO_LOW": ("The session's permission tier does not allow this.",
-                     "Raise the tier from the screen or command line."),
+    "TIER_TOO_LOW": ("The assistant does not have permission to do this.",
+                     "Give it that permission under “Assistant can” at the top, then ask again."),
     "MODEL_OUTPUT_INVALID": ("The language model returned output the code could not use, "
                              "so no money action was prepared (fail closed).", "Ask again."),
     "LIMIT_OUT_OF_RANGE": ("The family daily limit must stay between CNY 500 and CNY 1,000.",
@@ -77,6 +77,8 @@ REASONS = {
                              "Start the payment again."),
     "CONFIRMATION_EXPIRED": ("The 2-minute confirmation window passed.", "Start the payment again."),
     "TOOL_ERROR": ("The request could not be completed.", "Check the request and try again."),
+    "LLM_UNAVAILABLE": ("Qwen is not running on this computer, so it cannot be switched on.",
+                        "Start Ollama with the qwen2.5:7b model, then switch Qwen on again."),
 }
 
 STATUS = {
@@ -94,6 +96,7 @@ STATUS = {
     "REJECTED_BY_FAMILY": "The family rejected the request. Nothing moves.",
     "EXECUTED": "Executed once in the sandbox.",
     "CANCELLED": "Cancelled.",
+    "CANCEL_ASKED": "The student asked the family to cancel. Only the family can cancel.",
     "SETTING_CHANGED": "Setting changed.",
 }
 

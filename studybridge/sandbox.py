@@ -46,10 +46,11 @@ SIMULATED_LLMS = {"malformed": MalformedLLM, "disagree": DisagreeingLLM}
 
 class Sandbox:
     def __init__(self, profile_path, audit: AuditLog, llm=None, tier: Tier = Tier.TRANSACT,
-                 start: datetime = None, ticking: bool = False, narrate: bool = True):
+                 start: datetime = None, ticking: bool = False, narrate: bool = True, llm_client=None):
         self.profile_path = Path(profile_path)
         self.audit = audit
-        self.llm = llm
+        self.llm = llm                          # the model in use now (None = rules-only)
+        self.llm_client = llm_client or llm     # the model the operator's Qwen switch turns on
         self.tier = tier
         self.start = start
         self.ticking = ticking
@@ -102,9 +103,13 @@ class Sandbox:
             return a.family_set_doc(str(args.get("doc", "")), bool(args.get("ready")), actor=actor)
         if action == "cancel_allowance":
             return a.cancel_allowance(str(args.get("id", "")), actor=actor)
-        if action in ("set_tier", "advance_clock", "reset"):
+        if action == "ask_cancel":
+            return a.ask_cancel(str(args.get("id", "")), actor=actor)
+        if action in ("set_tier", "set_llm", "advance_clock", "reset"):
             if not actor_allowed(actor, action):
                 return a._actor_refused(actor, action)
+            if action == "set_llm":
+                return self._set_llm(args.get("on") is True)
             if action == "reset":
                 return self.reset()
             if action == "advance_clock":
@@ -126,6 +131,23 @@ class Sandbox:
             self.audit.append("tier_changed", {"tier": tier.name, "by": "operator (screen)"})
             return AgentResponse(f"Permission tier set to {tier.name}.", action)
         return a._blocked_action(action, "NOT_FOUND", f"Unknown action '{action}'.")
+
+    def _set_llm(self, on: bool) -> AgentResponse:
+        """Operator switch between Qwen and rules-only mode. Fails closed if the model is not reachable."""
+        a = self.agent
+        if on:
+            client = self.llm_client
+            if client is None or not getattr(client, "available", lambda: True)():
+                return a._blocked_action("set_llm", "LLM_UNAVAILABLE",
+                                         "No reachable Qwen model (is Ollama running with qwen2.5:7b?).")
+            self.llm = client
+        else:
+            self.llm = None
+        a.llm = self.llm
+        model = getattr(self.llm, "model", None)
+        self.audit.append("llm_switched", {"on": on, "model": model, "by": "operator (screen)"})
+        return AgentResponse(f"Qwen switched {'on (' + model + ')' if on else 'off: rules-only mode'}.", "set_llm",
+                             code="SETTING_CHANGED")
 
     # ------------------------------------------------------------ story autopilot
     def story_step(self, story_id: str, index: int) -> dict:
@@ -164,4 +186,4 @@ class Sandbox:
                  "setup": s.setup} for s in STORIES]
 
     def snapshot(self) -> dict:
-        return self.agent.snapshot()
+        return {**self.agent.snapshot(), "llm_switch": self.llm_client is not None}

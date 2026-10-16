@@ -78,11 +78,9 @@ def main(argv=None):
     demo = sub.add_parser("demo")
     demo.add_argument("--out", default=str(PROJECT_ROOT / "evidence"))
     web = sub.add_parser("web")
-    web.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
+    web.add_argument("--port", type=int, default=8765)
     web.add_argument("--host", default="127.0.0.1", help="keep 127.0.0.1 unless inside a container")
     args = ap.parse_args(argv)
-    if not args.today:      # lets a hosted demo pin the sandbox date without a command-line flag
-        args.today = os.environ.get("STUDYBRIDGE_TODAY") or None
 
     if args.cmd == "chat":
         cmd_chat(args)
@@ -100,6 +98,8 @@ def main(argv=None):
         from .web import serve
         probe = build_agent(args)
         start = datetime.fromisoformat(args.today + "T09:00") if args.today else None
+        # The Qwen switch on the screen turns this client on; it is only used if Ollama answers then.
+        client = probe.llm or OllamaClient(base_url=os.environ.get("OLLAMA_URL", OLLAMA_URL), model=args.model)
         sandbox = Sandbox(args.profile, probe.audit, llm=probe.llm, tier=Tier[args.tier], start=start,
-                          ticking=True)
+                          ticking=True, llm_client=client)
         serve(sandbox, args.port, args.host)

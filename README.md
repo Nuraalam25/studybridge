@@ -43,8 +43,8 @@ See [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) and
 Requires Python 3.10+. There are **no third-party dependencies**; only the standard library is used.
 
 ```bash
-git clone https://github.com/Nuraalam25/studybridge.git && cd studybridge
-python -m unittest discover -s tests -t .                      # 147 tests
+git clone https://github.com/MehazabinLamiha/StudyBridge.git && cd StudyBridge
+python -m unittest discover -s tests -t .                      # 152 tests
 python -m studybridge --today 2026-10-13 --tier TRANSACT web    # http://127.0.0.1:8765
 python -m studybridge --today 2026-10-13 demo                   # the 31 stories -> evidence/
 python -m studybridge stories                                   # list the 31 stories
@@ -70,8 +70,10 @@ One page with three screens:
   (invoice details, document names and warnings stay in English; the Bangla text still needs a native
   speaker's proofreading).
 
-Demo controls in the top bar: the **sandbox clock** (+1 h / +25 h / +73 h shows expiries), the
-permission tier, Reset, and **▶ Stories**, which plays any of the 31 stories step by step through
+Demo controls in the top bar: the **sandbox clock** (+1 h / +25 h / +73 h shows expiries),
+**Assistant can** (the permission tier in plain words: Rates only = PUBLIC, See my wallet = READ, Plan
+with me = ADVISE, Make payments = TRANSACT; a refused request offers the missing permission in one
+click), the Qwen switch, a light/dark switch (light by default), Reset, and **Play stories**, which plays any of the 31 stories step by step through
 the real app. To start a story on page load (useful for recording the video), open
 `http://127.0.0.1:8765/?story=A6`, `?story=B1,B2,B6` or `?story=all`, optionally with `&speed=2600`
 (presenter), `1400` (normal) or `500` (fast).
@@ -84,6 +86,8 @@ python -m studybridge --llm --today 2026-10-13 --tier TRANSACT web
 ```
 
 If Ollama is not reachable, StudyBridge logs a warning and runs rules-only. Every feature still works.
+In the web UI, the **Qwen** button in the top bar switches the model on and off without a restart; if
+Ollama is not running, switching on is refused and the app stays rules-only.
 
 ### Options
 
@@ -112,12 +116,6 @@ docker run --rm -p 127.0.0.1:8765:8765 studybridge
 
 Do not expose the web UI to the internet. It has no user authentication, because it is a
 single-user sandbox (see the known-risk list).
-
-**Hosted demo (optional, sandbox only):** `render.yaml` deploys the Docker image to Render for a
-public demo. Set `STUDYBRIDGE_ALLOWED_HOSTS` to the service's host name (the host check refuses every
-other name; by default only local names are allowed) and keep `STUDYBRIDGE_TODAY=2026-10-13`. Anyone with the link
-shares one sandbox, can reset it and can change the tier, and the state resets when the service restarts or
-sleeps. There is no real money and no Qwen (rules-only mode).
 
 ## Example requests
 
@@ -160,7 +158,7 @@ studybridge/
     audit.py        hash-chained audit log, PII masking
   web.py static/    local web UI (strict CSP, CSRF header, textContent rendering)
   demo.py           scripted run of the 31 stories that writes the evidence
-tests/              147 unit tests
+tests/              152 unit tests
 docs/               technical documentation, security self-assessment
 evidence/           sandbox operation logs; v0.1 runs in evidence/archive_v0.1
 data/               fictional sample profile, invoices and payees

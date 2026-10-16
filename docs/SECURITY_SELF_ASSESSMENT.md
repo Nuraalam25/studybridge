@@ -1,6 +1,6 @@
 # StudyBridge — Security Self-Assessment Report
 
-Version 0.3.0 (plan v3: three-gate safe payments) · scope: the sandbox build in this repository
+Version 0.3.0 (plan v4: three-gate safe payments) · scope: the sandbox build in this repository
 
 ## 1. Assets and threat model
 
@@ -48,7 +48,7 @@ How it is enforced:
 
 1. **Allowlist.** Any tool name not in `TOOL_TIERS` is denied (test: `test_unknown_tool_denied`).
 2. **Tier check before every assistant tool.** The session tier is set by the CLI flag at server
-   start or by the demo operator's tier menu, never by the LLM (tests: `test_tier_blocks_money_movement`,
+   start or by the demo operator's "Assistant can" menu, never by the LLM (tests: `test_tier_blocks_money_movement`,
    `test_tier_too_low_blocks_payment`). Tiers govern what the assistant may do from chat; actions on the
    phone screens are governed by the actor permissions (§2a). Even at a low tier no money moves,
    because the confirmation re-checks the tier (`test_tier_too_low_rechecked_at_confirmation`).
@@ -62,7 +62,7 @@ How it is enforced:
 5. **Re-check at execution.** Tier, BDT hard caps and every payment gate are evaluated again when the
    user confirms, which closes the time-of-check / time-of-use gap (tests:
    `test_tier_rechecked_at_confirmation`, `test_gate_rechecked_at_execution`).
-6. **Limits.** Per transaction BDT 400,000; per day BDT 600,000, reset at the date change
+6. **Limits.** Per transaction BDT 450,000; per day BDT 600,000, reset at the date change
    (test: `test_limits`).
 7. **Saved payees only.** The agent cannot add a payee or pay a raw account number
    (test: `test_unsaved_beneficiary_refused`).
@@ -97,6 +97,8 @@ How it is enforced:
 | Direct injection | `looks_like_injection()` blocks money movement for that message | `test_direct_injection_blocks_money_movement` |
 | Indirect injection (memo t16, invoice memos, the student's limit-raise note) | Free text is never parsed for intent and never sent to the LLM: the explanation prompt gets structured fields only (no memos, invoice purposes, notes or warnings). Memos are scanned and reported | `test_note_purpose_and_memos_never_reach_qwen` (records every prompt), `test_memo_injection_reported_not_followed` |
 | LLM offline or failing | Information requests fall back to rules-only; **money actions fail closed** with `MODEL_OUTPUT_INVALID` | `test_llm_offline_falls_back`, `test_fail_closed_for_money_only`, story D5 |
+| Qwen switch on the screen | Operator only (`set_llm`); switching on re-checks that Ollama answers and otherwise refuses with `LLM_UNAVAILABLE`, staying rules-only; every switch is audit-logged. Switching never changes a rule, limit or approval | `TestQwenSwitch` |
+| Student cancels an allowance | Refused (`ACTOR_NOT_PERMITTED`); the student can only ask the family to cancel (`ask_cancel`, a flag the family sees), which changes nothing by itself | `TestAskFamilyToCancel`, `test_student_cannot_cancel_an_allowance` |
 | Invented or shortened invoice id | An LLM invoice id must equal a whole id written in the message, otherwise it is dropped (real case: Qwen shortened `RENT-2026-11B` to `RENT-2026-11`) | `test_invented_invoice_id_dropped`, `test_partial_invoice_id_rejected` |
 | False payment or approval claims in explanations | Status words (e.g. "paid", "complete", "went through", "successful", "approved", "gave approval") are cut unless the outcome says so; information answers never claim a payment, and claim an approval only if the data says "approved"; a small number (0–10) with a currency must be grounded like any other amount; `$` amounts are checked as USD (real cases: "is approved with an allowance of $3000" for a pending CNY request; "the allowance request is now processed" for a request only sent) | `test_guard_cuts_false_payment_claim`, `test_false_approval_and_dollar_label_cut`, `test_status_words_need_the_right_outcome`, `test_false_approval_on_status_is_cut` (real qwen2.5:7b sentence), `test_more_false_payment_claims_are_cut`, `test_small_number_with_a_currency_must_be_grounded` |
 | A real number under the wrong label | A number next to "balance", "limit", "left", "fee" or "cap" must sit next to the same word in the facts | `test_number_must_keep_its_label` |
@@ -107,7 +109,7 @@ How it is enforced:
 
 | Area | Control |
 |---|---|
-| Network exposure | The web server binds to `127.0.0.1`; Docker publishes on `127.0.0.1` only when run as documented (`-p 127.0.0.1:8765:8765`). The host check answers only local names unless the operator lists a host in `STUDYBRIDGE_ALLOWED_HOSTS` for an optional public demo (README, 'Hosted demo'); that demo has no login, so any visitor shares one sandbox and can reset it |
+| Network exposure | The web server binds to `127.0.0.1`; Docker publishes on `127.0.0.1` only when run as documented (`-p 127.0.0.1:8765:8765`) |
 | CSRF and DNS rebinding | Every POST requires `Content-Type: application/json` **and** `X-StudyBridge: 1`, which a cross-site form cannot send. Requests whose `Host` is not 127.0.0.1/localhost, or POSTs with a foreign `Origin`, get 403 (`test_web_refuses_foreign_host_origin_and_bad_length`) |
 | XSS | All text rendered with `textContent`; CSP `default-src 'self'; script-src 'self'`; `frame-ancestors 'none'`; `nosniff` |
 | Input size | Request body ≤ 8 KB (a missing, negative or non-numeric length is refused); chat messages are cut to 1,000 characters on the web entry point (the terminal CLI is not capped); bad tier, clock or validity values are refused (`INVALID_CHOICE`) |
@@ -127,7 +129,7 @@ How it is enforced:
 | R4 | Sandbox rates and fees are static | Medium (advice quality) | Every quote is labelled "SANDBOX snapshot (illustrative)" | Integrate a licensed rate feed with timestamps and a staleness check |
 | R5 | Regulatory rules (Bangladesh Bank student-file limits, such as the reported one-semester-at-a-time release, and KYC/AML in China) are not modelled | Medium | Not claimed; transfers are sandbox-only | Add a compliance rule module per corridor; human compliance review |
 | R6 | Audit log is tamper-**evident**, not tamper-**proof**: someone with write access can rewrite the whole chain, or drop the newest records and leave a shorter chain that still verifies | Low–Medium | Any edit, deletion or reordering inside the chain is detected; evidence runs record the final record count and head hash, so a cut evidence log no longer matches its summary | Periodically anchor the head hash externally (WORM storage or a signed timestamp) |
-| R7 | Pending actions, approvals, allowances, limit raises, account holds and **today's spending totals** (family limit, the daily bank-limit card total and the BDT 600,000 daily cap) are held in memory, so restarting the app or pressing Reset clears them | Medium | Pending actions fail safe; the BDT 400,000 per-payment cap still applies | Persist counters and approvals (with expiry) in a database |
+| R7 | Pending actions, approvals, allowances, limit raises, account holds and **today's spending totals** (family limit, the daily bank-limit card total and the BDT 600,000 daily cap) are held in memory, so restarting the app or pressing Reset clears them | Medium | Pending actions fail safe; the BDT 450,000 per-payment cap still applies | Persist counters and approvals (with expiry) in a database |
 | R8 | Profile JSON (balances, transactions) is stored unencrypted on disk | Low (fictional data) | Sample data only | Encrypt at rest with an OS keystore for real data |
 | R9 | A 7B local model is slower than rules-only (about 6–10 s per request with explanations on the team's Mac; the v0.2 Qwen run took 198 s for 34 requests) | Low (usability) | Rules-only mode is instant | Smaller or faster model for parsing; cache explanations |
 | R10 | Credit index could be mistaken for an official score | Low | Disclaimer in every answer; "credit score" wording is cut from the LLM text | User research on wording |
@@ -140,8 +142,8 @@ How it is enforced:
 
 ## 6. Test summary
 
-`python -m unittest discover -s tests -t .` runs 147 tests, all passing: 15 core tests, 26 security
-tests in `tests/test_security.py`, 83 payment tests in `tests/test_payments.py` (one of which
+`python -m unittest discover -s tests -t .` runs 152 tests, all passing: 15 core tests, 26 security
+tests in `tests/test_security.py`, 88 payment tests in `tests/test_payments.py` (one of which
 plays all 31 stories and checks every expected outcome code) and 23 data tests in `tests/test_data.py`
 (the sample data is consistent, and every reason code is exercised by a test or story).
 

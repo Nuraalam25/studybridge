@@ -504,6 +504,18 @@ class PaymentBook:
         a["status"] = "cancelled"
         return a
 
+    def ask_cancel(self, item_id: str) -> dict:
+        """The student asks the family to cancel an open allowance or a pending allowance request.
+        Only a flag: the allowance stays usable until the family cancels it (or rejects the request)."""
+        self.expire()
+        item = self.allowances.get(item_id)
+        if item is None or item["status"] != "open":
+            item = self.requests.get(item_id)
+            if item is None or item["kind"] != "allowance" or item["status"] != "pending":
+                raise PaymentBlocked("NOT_FOUND", f"No open allowance or waiting allowance request {item_id}.")
+        item["cancel_asked"] = item.get("cancel_asked") or _iso(self.clock.ts())
+        return item
+
     def mark_paid(self, invoice_id: str):
         if invoice_id:
             self.invoices[invoice_id]["status"] = "paid"

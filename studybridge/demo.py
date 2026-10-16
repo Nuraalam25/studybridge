@@ -1,6 +1,6 @@
 """Scripted sandbox run that produces the execution-evidence bundle.
 
-It plays the 31 stories of plan v3 (studybridge/stories.py) through the same
+It plays the 31 stories of plan v4 (studybridge/stories.py) through the same
 Sandbox.act() entry point the web UI uses. Output folder evidence/run_<timestamp>/:
   transcript.md            every step: actor, request, outcome code, answer, guard cuts
   audit.jsonl              the hash-chained, masked audit log of the whole run
@@ -67,7 +67,7 @@ def run_demo(args, out_root: Path):
     md = [f"# StudyBridge sandbox run `{run_id}`", "",
           f"- version {__version__}; sandbox clock starts {start.isoformat(timespec='minutes')} for every story",
           f"- LLM: {'Ollama ' + llm.model if llm else 'off (rules-only parser, template explanations)'}",
-          "- 31 stories from plan v3; each starts from a fresh copy of `data/sample_profile.json`",
+          "- 31 stories from plan v4; each starts from a fresh copy of `data/sample_profile.json`",
           "- All money movement is simulated; no real account is touched.", ""]
     results, codes = [], Counter()
     guard_cuts = 0

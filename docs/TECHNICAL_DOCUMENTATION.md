@@ -1,6 +1,6 @@
 # StudyBridge — Technical Documentation
 
-Topic C: Cross-border & Student Finance Assistant · version 0.3.0 (plan v3: three-gate safe payments)
+Topic C: Cross-border & Student Finance Assistant · version 0.3.0 (plan v4: three-gate safe payments)
 
 Labels used below: **BUILT** (in this code), **ASSUMPTION** (team design, illustrative), **TEAM-STATED** (a teammate's experience, no public source found), **VERIFIED** (public source; see the plan's fact check).
 
@@ -29,7 +29,7 @@ Her real problems:
 
 ## 2. System architecture
 
-### 2.1 The agentic workflow (plan v3)
+### 2.1 The agentic workflow (plan v4)
 
 "Agentic" means the model takes part in a workflow whose steps are fixed in code. Qwen handles
 language only; code decides everything else. Every step is written to the audit log and shown live
@@ -88,7 +88,7 @@ Key design decisions:
 | Decision | Reason |
 |---|---|
 | The LLM never computes a number | Our earlier work with a 7B model showed frequent arithmetic, unit and labelling errors. Deterministic code is exact and testable. |
-| The LLM is optional | Everything works rules-only, so the system degrades gracefully, tests are deterministic, and no data has to leave the device. |
+| The LLM is optional | Everything works rules-only, so the system degrades gracefully, tests are deterministic, and no data has to leave the device. The demo operator can switch Qwen on and off from the top bar; switching on fails closed (`LLM_UNAVAILABLE`) if Ollama does not answer. BUILT |
 | Local model (Ollama) | Financial data stays on the machine; no third-party API key is needed. |
 | Standard library only | No supply-chain risk from dependencies; easy to audit and deploy. |
 | `Decimal` everywhere | Floats are never used for balances. |
@@ -146,9 +146,9 @@ A(T) = (T / rate + fixed_p · m(USD→src)) / (1 − pct_p)
 A unit test checks that `recv(p, A(T)) = T` to the cent.
 
 *Example (sandbox, BDT 50,000 → CNY, deadline 1 day):*
-- Digital service A delivers CNY 2,842.05 (cost 1.22%).
-- Mobile wallet C delivers CNY 2,811.23 (2.29%).
-- Cash-pickup B delivers CNY 2,749.61 (4.43%).
+- Digital service A delivers CNY 2,598.65 (cost 1.25%).
+- Mobile wallet C delivers CNY 2,571.37 (2.29%).
+- Cash-pickup B delivers CNY 2,510.24 (4.61%).
 - SWIFT is excluded because it takes 3 days.
 
 ### 3.2 Tuition planner
@@ -179,9 +179,10 @@ invoices are excluded), today *t*, the BDT balance, safety buffer *s* = 3 days. 
    and the sensitivity: `total × 2%` is the cost change from a 2% FX move.
 
 *Example:* INV-0003, CNY 22,800 due 2026-11-15, planned on 2026-10-13: send by 2026-11-11, BDT
-399,813.88 via Digital service A (1 day), no funding gap. At the sandbox rates this is BDT 186 under
-the BDT 400,000 per-payment hard cap, so the yearly invoice can be paid as one transfer; every other
-provider would go over the cap.
+437,109.10 via Digital service A (1 day), no funding gap. At the sandbox rates (1 CNY = 19 BDT) this is
+BDT 12,891 under the BDT 450,000 per-payment hard cap, so the yearly invoice can be paid as one
+transfer. The cap was raised from BDT 400,000 to 450,000 when the rate changed from about 17.4 to 19
+BDT per CNY (16 October 2026), so that one yearly invoice still fits.
 
 ### 3.3 Credit-building readiness index (0–100)
 
@@ -212,7 +213,7 @@ Every transaction in the sample history is converted to BDT at the mid rate and 
 - **Memo scan:** every memo is checked for instruction-like text (§4.3). Matching memos are
   reported but never executed.
 
-### 3.5 Safe payment path (plan v3)
+### 3.5 Safe payment path (plan v4)
 
 **Payee types** are stored data, never taken from the message or from Qwen.
 
@@ -225,7 +226,7 @@ Every transaction in the sample history is converted to BDT at the mid rate and 
 | food | no | Same cap as QR |
 | person_or_agent | yes | Blocked for tuition. Payees are stored data; the app cannot add one |
 
-**Limits** (sandbox rate: CNY 7.10 and BDT 123.39 per USD)
+**Limits** (sandbox rate: CNY 7.10 and BDT 134.90 per USD, so 1 CNY = 19 BDT; ASSUMPTION, illustrative)
 
 | Setting | Value | Label |
 |---|---|---|
@@ -233,7 +234,7 @@ Every transaction in the sample history is converted to BDT at the mid rate and 
 | Bank limit | USD 300 ≈ CNY 2,130, applied as a **daily total** of card spending | ASSUMPTION (team design; stricter than the public rule found, which is USD 300 per transaction) |
 | Food / QR cap | CNY 300 each, fixed (the family cannot change it), inside the family limit | ASSUMPTION |
 | One-day limit raise | Up to CNY 1,000 for one chosen day (today to 7 days ahead), approved by the family | ASSUMPTION |
-| Hard caps | BDT 400,000 per payment, 600,000 per day | BUILT |
+| Hard caps | BDT 450,000 per payment, 600,000 per day | BUILT (the amounts are team settings) |
 | Family approval window | 24 hours to decide; an approved tuition payment stays valid 24 hours | ASSUMPTION |
 | Student final confirmation | 2 minutes, single use; after a tuition approval it starts when the student opens the notification | BUILT (the 2-minute length is an ASSUMPTION) |
 | Allowance validity | Single-use: 72 hours default, 7 days maximum. Monthly rent: one per landlord, one bill per calendar month (by the bill's due date), up to 6 months (180 days in the sandbox). At most 3 open | ASSUMPTION |
@@ -304,10 +305,17 @@ which debits BDT at the wallet rate. The August 2026 education-card channel is *
 One page, three screens: the student's phone (chat, approval notifications, final-confirmation cards
 with a 2-minute ring, **Ask to raise my limit**), the family's phone in Dhaka (approval inbox for
 tuition, allowances, monthly rent, one-day limit raises and new bank accounts; daily-limit slider,
-documents, allowances; English or Bangla), and the **Glass Box** in between. The Glass Box shows the 11 steps as a pipeline coloured by
-who acts, the Gate 1 checks, what the rules reader and Qwen proposed and what code used, the limits,
-and the live audit chain with a verify button and a tamper test on a copy. A sandbox clock (+1 h,
-+25 h, +73 h) demonstrates expiries. **▶ Stories** plays any of the 31 stories step by step through
+documents, allowances; English or Bangla), and the **Glass Box** in between. The student phone has three tabs: **Home** (balances, the sandbox
+exchange rates, today's limits, allowances and recent activity, shown directly without asking the
+assistant), **Bills** (every stored bill and quote, with a warning when its account is not the saved one,
+and a Pay button that sends the request to the assistant) and **Assistant** (the chat). The Glass Box draws the
+latest request as a route: one stop per workflow step, coloured by who acts, each with a plain-language
+reason, and only the branch the request took (tuition or everyday). Its header says the outcome in one
+sentence, and for a refusal also why and what to do. Below it: the Gate 1 checks, what the rules reader
+and Qwen proposed and what code used, the limits and exchange rates, and the live audit chain with a
+verify button and a tamper test on a copy. A sandbox clock (+1 h, +25 h, +73 h) demonstrates expiries.
+The permission tier is shown as **Assistant can** with plain names (Rates only, See my wallet, Plan
+with me, Make payments). **Play stories** plays any of the 31 stories step by step through
 the real app (`/?story=A6` or `/?story=all` starts one on load, which is useful for recording).
 
 ## 4. Security design (summary — full detail in SECURITY_SELF_ASSESSMENT.md)
@@ -325,8 +333,11 @@ the real app (`/?story=A6` or `/?story=all` starts one on load, which is useful 
 **Actor** is a separate idea from the tier: who is acting (student, family, or the demo operator). It
 is set only by the screen or the command line, never by message text or Qwen. `ACTOR_ACTIONS` in
 `security/permissions.py` allows: student — chat, confirm, cancel, open an approval, ask to raise the
-limit, report a changed account; family — approve/reject, set the daily limit, mark documents ready, cancel an allowance;
-operator — tier, clock, reset. The student has no cancel-allowance action (plan §5.2).
+limit, report a changed account, ask the family to cancel an allowance; family — approve/reject, set
+the daily limit, mark documents ready, cancel an allowance; operator — tier, Qwen on/off, clock, reset.
+The student has no cancel-allowance action (plan v4 §5.2): from "My allowances" they can only ask the
+family to cancel a waiting request or an open allowance (`ask_cancel`). That sets a flag the family
+sees; the allowance stays usable until the family cancels it or rejects the request. BUILT
 
 Tiers govern what the assistant may do from chat. Actions on the two phone screens (approve, open an
 approval, ask for a limit raise, report an account) are governed by the actor permissions; even at a
@@ -337,7 +348,7 @@ time-of-use gap.
 
 ### 4.2 Money-movement controls
 
-- Per-transaction limit of BDT 400,000 and daily limit of BDT 600,000. The daily total resets each day.
+- Per-transaction limit of BDT 450,000 and daily limit of BDT 600,000. The daily total resets each day.
 - Payments only go to **saved payees**, and every payee type except food and QR needs a stored
   invoice, bill or quote. Payee, amount and account come from that stored document, never from the
   message. Food and QR payments have no document, so their amount comes from the message and is
@@ -393,7 +404,7 @@ regression test too.
 
 | Check | Result |
 |---|---|
-| Unit tests (v0.3) | 147 / 147 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
+| Unit tests (v0.3) | 152 / 152 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
 | Scripted runs v0.3 | To be generated from the final code after the freeze (rules-only and with qwen2.5:7b); the counts go here and in `evidence/README.md` from each `summary.json` |
 | v0.2 runs (`evidence/run_20261015_*`, earlier version, 25 stories) | rules-only 25/25; with Qwen 25/25, guard cut 15 sentences, 2 residual entity-binding errors; first Qwen run 24/25 (fixed, now regression tests) |
 | v0.1 runs (archived in `evidence/archive_v0.1/`) | run A rules-only, run B guard v1, run C guard v2: real history of the earlier version, kept unedited |

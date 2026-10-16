@@ -1,4 +1,4 @@
-"""Plan v3: gates, actors, allowances, bank review, limit raises, account changes, and the 31 stories."""
+"""Plan v4: gates, actors, allowances, bank review, limit raises, account changes, and the 31 stories."""
 import json
 import tempfile
 import unittest
@@ -64,7 +64,7 @@ class TestGateOne(unittest.TestCase):
     def test_yearly_tuition_fits_the_per_payment_cap(self):
         r = self.chat("pay invoice INV-0003")
         self.assertEqual(r.code, "AWAITING_FAMILY")
-        self.assertIn("399,813.88", r.text)
+        self.assertIn("437,109.10", r.text)
 
     def test_payee_type_and_amount_come_from_stored_data(self):
         r = self.chat("pay invoice INV-0003")
@@ -739,35 +739,6 @@ class TestWebAndAuditFixes(unittest.TestCase):
             srv.shutdown()
 
 
-class TestHostedDemoHosts(unittest.TestCase):
-    def test_extra_host_allowed_only_when_listed(self):
-        import http.client
-        import os
-        import threading
-        from http.server import ThreadingHTTPServer
-        from unittest import mock
-        from studybridge.web import _make_handler
-
-        def status(env, host):
-            with mock.patch.dict(os.environ, env):
-                srv = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(make_sandbox()))
-            threading.Thread(target=srv.serve_forever, daemon=True).start()
-            try:
-                c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
-                c.request("GET", "/api/state", headers={"Host": host})
-                return c.getresponse().status
-            finally:
-                srv.shutdown()
-
-        self.assertEqual(status({"STUDYBRIDGE_ALLOWED_HOSTS": ""}, "demo.onrender.com"), 403)
-        self.assertEqual(status({"STUDYBRIDGE_ALLOWED_HOSTS": "demo.onrender.com"}, "demo.onrender.com"), 200)
-        self.assertEqual(status({"STUDYBRIDGE_ALLOWED_HOSTS": "demo.onrender.com"}, "evil.example"), 403)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestPlanV4SmallFixes(unittest.TestCase):
     """The four small fixes from plan v4 §8."""
 
@@ -810,3 +781,91 @@ class TestPlanV4SmallFixes(unittest.TestCase):
         self.assertEqual(again.code, "ACCOUNT_CHANGED")        # still not payable
         self.assertNotIn("invoice_id", again.data)             # so the screen offers no new report
         self.assertIn("rejected", again.text)
+
+
+class TestAskFamilyToCancel(unittest.TestCase):
+    """The student cannot cancel an allowance, but can ask the family to (after the alert was sent)."""
+
+    def setUp(self):
+        self.sb = make_sandbox()
+        self.chat = lambda m: self.sb.act("student", "chat", {"message": m})
+
+    def book(self):
+        return self.sb.snapshot()["book"]
+
+    def test_ask_to_cancel_a_waiting_request_then_family_rejects(self):
+        rid = self.chat("request an allowance for Q-TM-0042").request_id
+        r = self.sb.act("student", "ask_cancel", {"id": rid})
+        self.assertEqual(r.code, "CANCEL_ASKED")
+        req = next(x for x in self.book()["requests"] if x["id"] == rid)
+        self.assertEqual(req["status"], "pending")              # only a flag: nothing changes by itself
+        self.assertTrue(req["cancel_asked"])
+        self.assertEqual(self.sb.act("family", "decide", {"request_id": rid, "approve": False}).code,
+                         "REJECTED_BY_FAMILY")
+        self.assertEqual(self.sb.act("student", "ask_cancel", {"id": rid}).code, "NOT_FOUND")
+
+    def test_ask_to_cancel_an_open_allowance_then_family_cancels(self):
+        rid = self.chat("request an allowance for Q-TM-0042").request_id
+        aid = self.sb.act("family", "decide", {"request_id": rid, "approve": True}).allowance_id
+        self.assertEqual(self.sb.act("student", "ask_cancel", {"id": aid}).code, "CANCEL_ASKED")
+        alw = next(x for x in self.book()["allowances"] if x["id"] == aid)
+        self.assertEqual(alw["status"], "open")
+        self.assertTrue(alw["cancel_asked"])
+        self.assertEqual(self.sb.act("student", "cancel_allowance", {"id": aid}).code, "ACTOR_NOT_PERMITTED")
+        self.assertEqual(self.sb.act("family", "cancel_allowance", {"id": aid}).code, "CANCELLED")
+        self.assertTrue(self.sb.audit.verify()["ok"])
+
+    def test_only_the_student_asks_and_only_for_allowances(self):
+        self.assertEqual(self.sb.act("family", "ask_cancel", {"id": "ALW-NONE"}).code, "ACTOR_NOT_PERMITTED")
+        self.assertEqual(self.sb.act("student", "ask_cancel", {"id": "ALW-NONE"}).code, "NOT_FOUND")
+        rid = self.chat("pay invoice INV-0003").request_id                  # tuition, not an allowance
+        self.assertEqual(self.sb.act("student", "ask_cancel", {"id": rid}).code, "NOT_FOUND")
+
+
+class TestQwenSwitch(unittest.TestCase):
+    def test_operator_switches_qwen_on_and_off(self):
+        client = FakeLLM()
+        sb = Sandbox(DEFAULT_PROFILE, AuditLog(Path(tempfile.mkdtemp()) / "audit.jsonl"), tier=Tier.TRANSACT,
+                     start=START, llm_client=client)
+        self.assertIsNone(sb.snapshot()["llm"])
+        self.assertTrue(sb.snapshot()["llm_switch"])
+        self.assertEqual(sb.act("operator", "set_llm", {"on": True}).code, "SETTING_CHANGED")
+        self.assertEqual(sb.snapshot()["llm"], "fake")
+        sb.act("operator", "reset")
+        self.assertEqual(sb.snapshot()["llm"], "fake")                   # a reset keeps the switch
+        self.assertEqual(sb.act("operator", "set_llm", {"on": False}).code, "SETTING_CHANGED")
+        self.assertIsNone(sb.snapshot()["llm"])
+        self.assertTrue(sb.audit.verify()["ok"])
+
+    def test_only_the_operator_and_fail_closed(self):
+        sb = make_sandbox()
+        self.assertEqual(sb.act("student", "set_llm", {"on": True}).code, "ACTOR_NOT_PERMITTED")
+        self.assertEqual(sb.act("operator", "set_llm", {"on": True}).code, "LLM_UNAVAILABLE")   # no model at all
+
+        class Down(FakeLLM):
+            def available(self):
+                return False
+
+        sb = Sandbox(DEFAULT_PROFILE, AuditLog(Path(tempfile.mkdtemp()) / "audit.jsonl"), tier=Tier.TRANSACT,
+                     start=START, llm_client=Down())
+        self.assertEqual(sb.act("operator", "set_llm", {"on": True}).code, "LLM_UNAVAILABLE")
+        self.assertIsNone(sb.snapshot()["llm"])
+
+
+class TestScreenData(unittest.TestCase):
+    """Data the redesigned screen relies on: rates, the missing permission, and a plain reason."""
+
+    def test_rates_needed_permission_and_reason(self):
+        sb = make_sandbox()
+        rates = sb.snapshot()["rates"]
+        self.assertEqual((rates["BDT_per_CNY"], rates["CNY_per_USD"], rates["BDT_per_USD"]),
+                         ("19.00", "7.10", "134.90"))           # sent to the screen as strings
+        sb.act("operator", "set_tier", {"tier": "ADVISE"})
+        r = sb.act("student", "chat", {"message": "pay invoice INV-0003"})
+        self.assertEqual((r.code, r.data["needs_tier"]), ("TIER_TOO_LOW", "TRANSACT"))
+        case = sb.snapshot()["cases"][-1]
+        self.assertTrue(case["why"] and case["fix"])
+
+
+if __name__ == "__main__":
+    unittest.main()

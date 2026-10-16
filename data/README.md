@@ -49,8 +49,8 @@ Each payee has a `type` (stored data, never taken from a message or from the AI)
 
 Tuition is one invoice per academic year because universities bill a full year (see the technical
 documentation, §3.2). At the sandbox rates and via the cheapest provider (Digital service A, fee and FX
-margin included), CNY 22,800 costs BDT 399,813.88: BDT 186 under the BDT 400,000 per-payment cap. Any
-other provider would go over it.
+margin included), CNY 22,800 costs BDT 437,109.10 (1 CNY = 19 BDT): BDT 12,891 under the BDT 450,000
+per-payment cap.
 
 ## Other untrusted text
 

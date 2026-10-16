@@ -1,4 +1,4 @@
-"""The 31 test stories of plan v3 (groups A-E), as data.
+"""The 31 test stories of plan v4 (groups A-E), as data.
 
 The same list drives three things: the unit test that checks every outcome,
 the scripted evidence run (`python -m studybridge demo`) and the web UI's
