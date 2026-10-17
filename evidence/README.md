@@ -7,19 +7,33 @@ UI. Each story starts from a fresh copy of `data/sample_profile.json` with the s
 
 Two things differ between two runs of the same code, by design: request ids are random, and each
 audit record's `ts` is the real time the run was made (the sandbox clock is shown in the transcript).
-Each v0.3 `summary.json` also records the audit log's final record count and head hash, so a log that
+Each v0.3 and v0.4 `summary.json` also records the audit log's final record count and head hash, so a log that
 was cut short later can be detected.
 
-## v0.3 runs (plan v4, 31 stories + 5 information requests)
+## v0.4 runs (plan v4 + the view features of the ideas doc, 31 stories + 5 information requests)
 
 | Folder | LLM | Stories as expected | Info requests as expected | Executed payments | Sentences cut by guard | Audit chain | Tamper test on copy |
 |---|---|---|---|---|---|---|---|
-| `run_20261016_211539_rules` | off (rules only) | **31/31** | **5/5** | 11 | 1 (the simulated malformed model in D5) | OK (370 records) | detected at record 12 |
+| `run_20261017_145750_rules` | off (rules only) | **31/31** | **5/5** | 11 | 1 (the simulated malformed model in D5) | OK (370 records) | detected at record 12 |
 
-Made on 16 Oct 2026 (Python 3.13) on the code with the 19 BDT per CNY rate and the BDT 450,000 cap. The
-`--llm` (Qwen) run is still to be made with Ollama (`python -m studybridge --llm --today 2026-10-13 demo`);
-add its row here from its `summary.json`. Only runs listed here may be quoted on slides. If the code changes
-again, make both runs again.
+Made on 17 Oct 2026 (Python 3.13) on the v0.4.0 code. The folder holds `audit.jsonl.head`, the record count and head
+hash that `verify-audit` compares with the log; each audit record also carries `sandbox_ts`, the sandbox clock time.
+`summary.json` records what the impact counter added in each story (`impact_added`) and the total after all 31
+stories (`impact_total`): BDT 1,843,000.00 protected from wrong accounts, 7 scams stopped, BDT 10,571.09 saved against a
+bank wire. The five scam stories B1, B2, B6, B8 and B9 add BDT 433,200 + 433,200 + 76,000 + 433,200 + 433,200 = BDT 1,808,800
+and 5 scams (B3, the changed rent account, adds BDT 34,200 and D2, "ignore your rules", adds a scam but no money). A1 adds
+BDT 10,571.09 of fees saved. The `--llm` (Qwen) run is still to be made with Ollama
+(`python -m studybridge --llm --today 2026-10-13 demo`); add its row here from its `summary.json`. Only runs listed
+here may be quoted on slides. If the code changes again, make both runs again.
+
+## v0.3.0 run (an earlier build, before the v0.4 features)
+
+> Made on 16 Oct 2026 on the v0.3.0 code (19 BDT per CNY, BDT 450,000 cap, audit head file) and kept unedited as history.
+> It has the same story outcomes as the v0.4 run; do not quote it for v0.4 features such as the impact counter.
+
+| Folder | LLM | Stories as expected | Info requests as expected | Executed payments | Sentences cut by guard | Audit chain | Tamper test on copy |
+|---|---|---|---|---|---|---|---|
+| `run_20261016_213828_rules` | off (rules only) | **31/31** | **5/5** | 11 | 1 (the simulated malformed model in D5) | OK (370 records) | detected at record 12 |
 
 ## v0.2 runs (earlier version: plan v2, 25 stories)
 

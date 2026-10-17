@@ -44,6 +44,11 @@ INFO_REQUESTS = [
 ]
 
 
+def _impact(sandbox) -> dict:
+    i = sandbox.snapshot()["impact"]
+    return {"protected_bdt": i["protected_bdt"], "scams_stopped": i["scams_stopped"], "fees_saved_bdt": i["fees_saved_bdt"]}
+
+
 def run_demo(args, out_root: Path):
     llm = None
     if args.llm:
@@ -72,11 +77,14 @@ def run_demo(args, out_root: Path):
     results, codes = [], Counter()
     guard_cuts = 0
     for story in STORIES:
+        before = _impact(sandbox)
         steps = sandbox.run_story(story.id)
         ok = all(s["ok"] for s in steps)
+        after = _impact(sandbox)
         results.append({"story": story.id, "title": story.title, "group": GROUPS[story.group],
                         "outcome": steps[-1]["response"]["code"], "expected_outcomes_met": ok,
-                        "codes": [s["response"]["code"] for s in steps]})
+                        "codes": [s["response"]["code"] for s in steps],
+                        "impact_added": {k: str(after[k] - before[k]) for k in after}})
         md += [f"## {story.id}. {story.title}", "", f"*{story.shows}*", ""]
         if story.setup:
             md += [f"> Story setup (sandbox only): `{json.dumps(story.setup)}`", ""]
@@ -122,11 +130,13 @@ def run_demo(args, out_root: Path):
     tamper_result = AuditLog(tampered).verify()
 
     passed = sum(r["expected_outcomes_met"] for r in results)
+    impact_total = _impact(sandbox)
     summary = {"run_id": run_id, "version": __version__, "clock_start": start.isoformat(),
                "llm": llm.model if llm else None, "stories": len(results), "stories_as_expected": passed,
                "outcome_codes": dict(sorted(codes.items())), "executed": codes["EXECUTED"],
                "guard_sentences_cut": guard_cuts, "results": results,
                "info_requests": info, "info_requests_as_expected": sum(i["as_expected"] for i in info),
+               "impact_total": {k: str(v) for k, v in impact_total.items()},
                "audit_head": head,
                "audit_verification": verification, "tamper_test_on_copy": tamper_result,
                "python": sys.version.split()[0]}
@@ -135,6 +145,9 @@ def run_demo(args, out_root: Path):
            f"- Information requests answered as expected: {sum(i['as_expected'] for i in info)}/{len(info)}",
            f"- Audit head (to detect a truncated log later): {head['records']} records, hash {head['head_hash']}",
            f"- Executed payments: {codes['EXECUTED']}; sentences cut by the guard: {guard_cuts}",
+           f"- Impact counter after all stories (sandbox session): BDT {impact_total['protected_bdt']:,} protected, "
+           f"{impact_total['scams_stopped']} scams stopped, BDT {impact_total['fees_saved_bdt']:,} saved against a bank wire. "
+           "Each story's own share is in summary.json (`impact_added`).",
            f"- Audit chain verification: {verification}",
            f"- Tamper test (one character changed in a copy): {tamper_result}", ""]
     (out / "transcript.md").write_text("\n".join(md), encoding="utf-8")

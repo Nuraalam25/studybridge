@@ -9,5 +9,7 @@ services:
     envVars:
       - key: STUDYBRIDGE_ALLOWED_HOSTS
         sync: false
+      - key: STUDYBRIDGE_DEMO_PASSWORD   # optional: leave unset for an open demo; set it to ask visitors for a password
+        sync: false
       - key: STUDYBRIDGE_TODAY
         value: "2026-10-13"

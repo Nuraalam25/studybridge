@@ -16,6 +16,9 @@ window.I18N = {
     phone: "Number on file", hold: "After you approve, a 24-hour wait follows before it can be paid.",
     raisedToday: "raised for today",
     cancelAsked: "Student asks to cancel", cancelAskedReq: "The student asks you to cancel this request. Reject it to cancel.",
+    alerts: "Stopped for your student", alertsNone: "Nothing has been stopped yet.", todo: "What to do",
+    scamSignal: "Scam signal: pressure wording", scamNote: "Real universities do not demand same-day payment through an agent.",
+    injectionNote: "contains instruction-like text. It was treated as data and never followed.",
   },
   bn: {
     where: "ঢাকা · পরিবার (টাকা পাঠান)", inbox: "অনুমোদনের তালিকা", limit: "দৈনিক সীমা", docs: "কাগজপত্র",
@@ -31,6 +34,9 @@ window.I18N = {
     acct: "নতুন ব্যাংক অ্যাকাউন্ট", called: "আমি আগে থেকে সংরক্ষিত নম্বরে ফোন করে নিশ্চিত হয়েছি (বিলের নম্বরে নয়)",
     phone: "সংরক্ষিত নম্বর", hold: "অনুমোদনের পর ২৪ ঘণ্টা অপেক্ষার পরেই টাকা পাঠানো যাবে।",
     raisedToday: "আজকের জন্য বাড়ানো",
+    alerts: "শিক্ষার্থীর জন্য থামানো হয়েছে", alertsNone: "এখনো কিছু থামানো হয়নি।", todo: "করণীয়",
+    scamSignal: "স্ক্যামের লক্ষণ: তাড়া দেওয়ার ভাষা", scamNote: "আসল বিশ্ববিদ্যালয় এজেন্টের মাধ্যমে একই দিনে টাকা চায় না।",
+    injectionNote: "এতে নির্দেশের মতো লেখা আছে। এটিকে শুধু তথ্য হিসেবে ধরা হয়েছে, মানা হয়নি।",
     cancelAsked: "শিক্ষার্থী বাতিল করতে বলেছে", cancelAskedReq: "শিক্ষার্থী এই অনুরোধটি বাতিল করতে বলেছে। বাতিল করতে প্রত্যাখ্যান করুন।",
   },
 };

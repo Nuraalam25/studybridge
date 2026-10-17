@@ -242,6 +242,8 @@ function render() {
   renderMine();
   renderFamily();
   renderGlass();
+  renderImpact();
+  if ($("challenge").open) renderChallengeTier();
 }
 
 function renderWallet() {
@@ -312,6 +314,12 @@ function renderBills() {
       right.append(el("strong", `${i.currency} ${num(i.amount)}`));
       if (i.status === "paid") right.append(el("span", "Paid", "small muted"));
       else {
+        if (i.xray && i.xray.suspicious) {
+          const why = el("button", "Why?", "btn small danger");
+          why.type = "button";
+          why.onclick = () => openXray(i);
+          right.append(why);
+        }
         const pay = el("button", "Pay", "btn small primary");
         pay.type = "button";
         pay.onclick = () => sendChat(`${verb} ${i.id}`);
@@ -322,6 +330,169 @@ function renderBills() {
     }
     box.append(group);
   }
+}
+
+
+// ------------------------------------------------------------------ invoice X-ray (F1)
+// Draws what the code already found (server-side view data). Full account numbers never reach the browser:
+// only the positions that differ and the last four digits.
+function marked(segs, cls) {
+  const box = el("span", undefined, cls || "xr-text");
+  for (const g of segs) {
+    if (g.m === "missing") box.append(el("span", g.t, "mk mk-missing"));
+    else if (g.m) box.append(el("span", g.t, `mk mk-${g.m}`));
+    else box.append(document.createTextNode(g.t));
+  }
+  return box;
+}
+
+function digitRow(length, last4, diff, role) {
+  const row = el("div", undefined, "digits");
+  for (let i = 0; i < length; i++) {
+    const shown = i >= length - 4 ? last4[i - (length - 4)] : "•";
+    const bad = diff.has(i);
+    row.append(el("span", bad && shown === "•" ? "×" : shown, "dg" + (bad ? ` dg-${role}` : "")));
+  }
+  return row;
+}
+
+function xrayCard(inv) {
+  const x = inv.xray;
+  const card = el("div", undefined, "xray");
+  const head = el("div", undefined, "xr-head");
+  head.append(el("strong", `${inv.id} · ${inv.purpose}`), el("span", `${inv.currency} ${num(inv.amount)}`, "muted"));
+  card.append(head);
+  if (x.gate1) {
+    const v = el("div", undefined, "xr-verdict");
+    v.append(el("span", human(x.gate1), "code c-fail"), document.createTextNode(" Gate 1 stops this bill. The code decides, not the AI."));
+    card.append(v);
+  }
+  if (x.issuer.length) {
+    const r = el("div", undefined, "xr-row");
+    r.append(el("div", "Issuer on the bill", "xr-lbl"), marked(x.issuer, "xr-val"),
+      el("div", `Saved payee: ${x.saved_name}`, "xr-sub"));
+    card.append(r);
+  }
+  const a = x.account;
+  if (a.kind !== "none") {
+    const r = el("div", undefined, "xr-row");
+    r.append(el("div", "Account to pay", "xr-lbl"));
+    const diff = new Set(a.positions);
+    if (a.same) {
+      r.append(el("div", `Matches the saved account (…${a.last4}).`, "xr-ok"));
+    } else {
+      r.append(el("div", "On the bill", "xr-sub"), digitRow(a.length, a.last4, diff, "bad"));
+      r.append(el("div", `Saved for ${inv.payee}`, "xr-sub"),
+        digitRow(a.saved_length, a.saved_last4, a.kind === "digits" ? diff : new Set(), "was"));
+      const n = a.positions.length;
+      r.append(el("div", a.kind === "digits"
+        ? `${n} digit${n === 1 ? "" : "s"} differ${n === 1 ? "s" : ""}. A family member would not see this on a phone screen.`
+        : "A different account number altogether.", "xr-note"));
+      if (x.belongs_to) r.append(el("div", `That account belongs to ${x.belongs_to}, not to ${inv.payee}.`, "xr-note"));
+      else if (a.kind === "different") r.append(el("div", "That account is not saved for anyone. The assistant never adds one.", "xr-note"));
+    }
+    card.append(r);
+  }
+  if (x.payee_type === "person_or_agent") {
+    card.append(el("div", "This payee is saved as an agent or consultancy. Tuition and seat fees never go to an agent.", "xr-note"));
+  }
+  if (x.memo.some((g) => g.m)) {
+    const r = el("div", undefined, "xr-row");
+    r.append(el("div", "Message on the bill", "xr-lbl"), marked(x.memo, "xr-val"));
+    if (x.pressure) r.append(el("div", "Pressure wording is a scam signal. It never decides anything; it is shown as a warning.", "xr-sub"));
+    if (x.injection) r.append(el("div", "This is an instruction aimed at the AI. It is data, not a command: it is ignored.", "xr-sub"));
+    card.append(r);
+  }
+  const legend = el("div", undefined, "xr-legend");
+  legend.append(el("span", "differs", "mk mk-typo"), el("span", "missing letter", "mk mk-missing"),
+    el("span", "extra word", "mk mk-extra"), el("span", "pressure", "mk mk-pressure"), el("span", "instruction to the AI", "mk mk-injection"));
+  card.append(legend);
+  return card;
+}
+
+function openXray(inv) {
+  $("xray-body").replaceChildren(xrayCard(inv));
+  $("xray").showModal();
+}
+
+// In the Glass Box the X-ray opens by itself when Gate 1 stopped a bill on an account, name or wording check.
+const XRAY_CODES = ["PAYEE_NOT_VERIFIED", "ACCOUNT_CHANGED", "ACCOUNT_ON_HOLD"];
+function renderCaseXray(c) {
+  const box = $("case-xray");
+  box.replaceChildren();
+  if (!c || !c.invoice_id || !XRAY_CODES.includes(c.outcome)) return;
+  const inv = state.book.invoices.find((i) => i.id === c.invoice_id);
+  if (inv && inv.xray.suspicious) box.append(xrayCard(inv));
+}
+
+
+// ------------------------------------------------------------------ money-route map (F4)
+// Draws only what the case already holds (step statuses). No logic of its own: money reaches Shenzhen only when
+// every stop is green, and the student's own confirmation is always last.
+const MAP_WHO = { wallet: "family", gate: "code", family: "family", bank: "bank", student: "person", pay: "code", dest: "bank" };
+function renderMap(c) {
+  const box = $("route-map");
+  box.replaceChildren();
+  if (!c || c.kind !== "payment") return;
+  const steps = c.steps || {};
+  const st = (k) => (steps[k] ? steps[k].status : "idle");
+  const { tuition, everyday } = routeOf(steps);
+  const famKey = tuition ? "6a" : everyday ? "8b" : steps["6a"] ? "6a" : "8b";
+  const f = c.funding;
+  const pay = c.payment;
+  const inv = c.invoice_id ? state.book.invoices.find((i) => i.id === c.invoice_id) : null;
+  const dest = (pay && pay.payee_name) || (inv && inv.payee) || (tuition ? "University" : "Shop or food");
+  const gateCode = st("4") === "fail" ? human(c.outcome) : "";
+  const nodes = [
+    ["wallet", "Family wallet", "Dhaka", "pass"],
+    ["gate", "Safety checks", gateCode || "Gate 1", st("4")],
+    ["family", "Family approves", everyday && st("8b") === "skip" ? "inside daily limit" : "", st(famKey)],
+    ["bank", "Bank review", everyday ? "simulated" : "", st("7b") === "idle" && tuition ? "skip" : st("7b")],
+    ["student", "Student confirms", "always last", st("9")],
+    ["pay", f ? f.provider : "Pays once", f ? [f.fee_bdt ? `fee BDT ${num(f.fee_bdt)}` : "", f.bdt_per_unit ? `1 ${f.currency} = BDT ${num(f.bdt_per_unit)}` : ""].filter(Boolean).join(" · ") : "", st("10")],
+    ["dest", dest, "Shenzhen", st("10") === "pass" ? "pass" : "idle"],
+  ];
+  const list = el("ol", undefined, "map");
+  nodes.forEach(([key, title, sub, status], i) => {
+    if (i > 0) list.append(el("li", undefined, `conn c-${status === "skip" ? nodes[i - 1][3] : status}`));
+    const li = el("li", undefined, `mnode m-${status}`);
+    const dot = el("span", undefined, "mdot");
+    dot.append(icon(WHO_ICON[MAP_WHO[key]] || "code"));
+    const txt = el("span", undefined, "mtxt");
+    txt.append(el("strong", title));
+    if (sub) txt.append(el("span", sub));
+    li.append(dot, txt);
+    list.append(li);
+  });
+  box.append(list);
+}
+
+// ------------------------------------------------------------------ impact counter (F2)
+const shownImpact = { protected: 0, scams: 0, fees: 0 };
+function countTo(node, key, target, fmt) {
+  const from = shownImpact[key];
+  if (from === target) { node.textContent = fmt(target); return; }
+  shownImpact[key] = target;
+  node.classList.remove("bump");
+  void node.offsetWidth;
+  node.classList.add("bump");
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { node.textContent = fmt(target); return; }
+  const t0 = performance.now(), dur = 900;
+  const tick = (now) => {
+    const k = Math.min(1, (now - t0) / dur);
+    node.textContent = fmt(from + (target - from) * (1 - Math.pow(1 - k, 3)));
+    if (k < 1 && shownImpact[key] === target) requestAnimationFrame(tick);
+    else node.textContent = fmt(target);
+  };
+  requestAnimationFrame(tick);
+}
+
+function renderImpact() {
+  const i = state.impact;
+  if (!i) return;
+  countTo($("imp-protected"), "protected", Number(i.protected_bdt), (v) => `BDT ${num(v, 0)}`);
+  countTo($("imp-scams"), "scams", Number(i.scams_stopped), (v) => String(Math.round(v)));
+  countTo($("imp-fees"), "fees", Number(i.fees_saved_bdt), (v) => `BDT ${num(v, 2)}`);
 }
 
 function showStudentTab(name) {
@@ -437,6 +608,7 @@ function renderFamily() {
   $("inbox-count").textContent = pending.length ? String(pending.length) : "";
   if (!pending.length) inbox.append(el("div", t("empty"), "empty"));
   for (const r of pending.slice().reverse()) inbox.append(requestCard(r));
+  renderAlerts();
 
   const base = Number(b.family_limit), lim = Number(b.family_limit_today);
   if (document.activeElement !== $("limit")) $("limit").value = base;
@@ -478,6 +650,46 @@ function renderFamily() {
   for (const r of done) hist.append(el("li", `${r.id} · ${r.invoice_id || human(r.kind)} · CNY ${num(r.amount)} · ${t(r.status) || r.status}`));
 }
 
+// What the code stopped for the student, with the reason and the fix step in the family's language (F6a).
+function reasonText(code, c) {
+  const bn = lang === "bn" && window.REASONS_BN && window.REASONS_BN[code];
+  return bn ? { why: bn[0], fix: bn[1] } : { why: c.why || "", fix: c.fix || "" };
+}
+
+function renderAlerts() {
+  const ul = $("alerts");
+  ul.replaceChildren();
+  const hits = (state.cases || []).filter((c) => c.kind === "payment" && c.outcome && outcome(c.outcome)[1] === "fail"
+    && c.outcome !== "REJECTED_BY_FAMILY").slice(-5).reverse();
+  if (!hits.length) { ul.append(el("li", t("alertsNone"), "muted")); return; }
+  for (const c of hits) {
+    const inv = c.invoice_id && state.book.invoices.find((i) => i.id === c.invoice_id);
+    const li = el("li", undefined, "alert");
+    const head = el("div", undefined, "a-head");
+    head.append(el("span", human(c.outcome), "code c-fail"),
+      el("b", inv ? `${inv.id} · ${inv.currency} ${num(inv.amount)}` : c.title.length > 48 ? c.title.slice(0, 48) + "…" : c.title));
+    const r = reasonText(c.outcome, c);
+    li.append(head, el("div", r.why, "a-why"));
+    if (r.fix) {
+      const fix = el("div", undefined, "a-fix");
+      fix.append(el("b", t("todo") + ": "), document.createTextNode(r.fix));
+      li.append(fix);
+    }
+    ul.append(li);
+  }
+}
+
+// The two warnings the code writes in English, shown in Bangla when the family phone is in Bangla.
+function warningText(w) {
+  if (lang !== "bn") return w;
+  if (w.startsWith("Scam signal: pressure wording")) {
+    const words = (w.match(/"[^"]+"/g) || []).join(", ");
+    return `${t("scamSignal")} ${words}। ${t("scamNote")}`;
+  }
+  const m = w.match(/^(\S+) contains instruction-like text/);
+  return m ? `${m[1]} ${t("injectionNote")}` : w;
+}
+
 function requestCard(r) {
   const card = el("div", undefined, "req" + (seenRequests.has(r.id) ? "" : " new"));
   seenRequests.add(r.id);
@@ -506,7 +718,7 @@ function requestCard(r) {
     card.append(el("div", `✓ ${t("bank")}: USD ${num(Number(br.card_today_usd || 0) + Number(br.amount_usd))} today > USD ${num(br.limit_usd, 0)} → approved until ${br.window_until.replace("T", " ")}`, "line ok"));
   }
   if (r.kind === "allowance") card.append(el("div", r.monthly ? t("monthlyNote") : t("single"), "line small muted"));
-  for (const w of r.warnings || []) card.append(el("div", `⚠ ${t("warn")}: ${w}`, "warn"));
+  for (const w of r.warnings || []) card.append(el("div", `⚠ ${t("warn")}: ${warningText(w)}`, "warn"));
   card.append(el("div", `${t("expires")} ${dur(r.seconds_left)}`, "exp"));
   const row = el("div", undefined, "row");
   const extra = {};
@@ -608,6 +820,8 @@ function renderGlass() {
   const c = currentCase();
   if (c) sel.value = c.id;
   renderRouteHead(c);
+  renderMap(c);
+  renderCaseXray(c);
   renderPipeline(c);
   renderChecks(c);
   renderAI(c);
@@ -849,11 +1063,11 @@ async function typeInto(text, speed) {
   input.value = "";
 }
 
-async function runStories(ids) {
+async function runStories(ids, opts = {}) {
   if (pilot.running) return;
   Object.assign(pilot, { running: true, paused: false, stop: false });
   $("caption").hidden = false;
-  const speed = () => Number($("speed").value);
+  const speed = () => opts.speed || Number($("speed").value);
   for (const id of ids) {
     if (pilot.stop) break;
     const s = stories.find((x) => x.id === id);
@@ -877,10 +1091,113 @@ async function runStories(ids) {
     toast(`${s.id} ${allOk ? "✓ outcomes as expected" : "✕ mismatch"}`);
     await sleep(speed() * 0.8);
   }
+  if (opts.finale && !pilot.stop) await opts.finale(speed());
   setActing(null);
   $("caption").hidden = true;
   pilot.running = false;
+  document.body.classList.remove("presenter");
   renderStories();
+}
+
+
+
+// ------------------------------------------------------------------ scam challenge (F5)
+// Every attack is a normal student chat message sent through act(): no special route, nothing bypassed.
+const score = { attempts: 0, stopped: 0, waiting: 0, ready: 0, moved: 0 };
+const FAMILY_WAIT = ["AWAITING_FAMILY", "ALLOWANCE_REQUESTED"];
+let attacks = [];
+
+function renderScore() {
+  $("sc-attempts").textContent = score.attempts;
+  $("sc-stopped").textContent = score.stopped;
+  $("sc-waiting").textContent = score.waiting;
+  $("sc-ready").textContent = score.ready;
+  $("sc-moved").textContent = score.moved;
+  $("score").querySelector(".s-moved").classList.toggle("bad", score.moved > 0);
+}
+
+function renderChallengeTier() {
+  const box = $("challenge-tier");
+  box.replaceChildren();
+  box.hidden = !state || state.tier === "TRANSACT";
+  if (box.hidden) return;
+  box.append(el("span", `The assistant may only “${tierName(state.tier)}” right now, so payment attacks would end as “permission too low”. For a fair test, allow payments: `));
+  const b = el("button", "Allow payments", "btn small primary");
+  b.type = "button";
+  b.onclick = () => act("operator", "set_tier", { tier: "TRANSACT" });
+  box.append(b);
+}
+
+async function attack(message, title) {
+  const text = message.trim();
+  if (!text) return;
+  const before = state.payments.length;
+  showStudentTab("assistant");
+  addUser(text);
+  const r = await act("student", "chat", { message: text });
+  score.attempts += 1;
+  if (FAMILY_WAIT.includes(r.code)) score.waiting += 1;
+  else if (r.code === "READY_TO_CONFIRM") score.ready += 1;
+  else if (r.blocked || r.code === "CLARIFY") score.stopped += 1;
+  if (state.payments.length > before) score.moved += state.payments.length - before;   // chat can never do this
+  renderScore();
+  const why = (r.text.split("\n").find((l) => l.startsWith("Why: ")) || "").replace(/^Why: /, "");
+  const li = el("li", undefined, "attempt");
+  const head = el("div", undefined, "a-head");
+  head.append(el("span", human(r.code), "code " + codeClass(r)), el("b", title || text));
+  li.append(head, el("div", outcome(r.code)[0], "a-out"));
+  if (why) li.append(el("div", why, "a-why"));
+  const see = el("button", "Show it in the Glass Box", "btn small");
+  see.type = "button";
+  see.onclick = () => { $("challenge").close(); showTab("glass"); };
+  li.append(see);
+  $("attempts").prepend(li);
+  return r;
+}
+
+function renderAttacks() {
+  const box = $("attacks");
+  box.replaceChildren();
+  for (const a of attacks) {
+    const b = el("button", undefined, "attack");
+    b.type = "button";
+    b.append(el("strong", a.title), el("span", a.says));
+    b.onclick = () => attack(a.message, a.title);
+    box.append(b);
+  }
+}
+
+async function openChallenge() {
+  if (!attacks.length) { attacks = await api("/api/attacks"); renderAttacks(); }
+  renderChallengeTier();
+  renderScore();
+  $("challenge").showModal();
+}
+
+// ------------------------------------------------------------------ judge tour (F3)
+// Plays five of the normal stories in a fixed order, then the tamper test. Same stories, same expected codes.
+const TOUR = ["A1", "B2", "B6", "A6", "D2"];
+async function tourFinale(speed) {
+  $("cap-story").textContent = "Finale";
+  $("cap-text").textContent = "Audit log: change one character in a copy and the chain breaks. The real log stays untouched.";
+  $("cap-progress").textContent = "tamper test";
+  setActing(null);
+  showTab("glass");
+  document.querySelector('.seg button[data-detail="audit"]').click();
+  $("verify-result").scrollIntoView({ block: "center", behavior: "smooth" });
+  await waitWhilePaused();
+  await $("verify").onclick();
+  await sleep(speed * 0.7);
+  await waitWhilePaused();
+  await $("tamper").onclick();
+  await sleep(speed * 1.6);
+}
+
+function startTour(speed = 4800) {
+  if (pilot.running) return;
+  document.body.classList.add("presenter");
+  showTab("student");
+  runStories(TOUR, { speed, finale: tourFinale });
 }
 
 async function stepStory(s, i, speed) {
@@ -1019,6 +1336,16 @@ function wire() {
   });
   $("open-stories").onclick = () => { renderStories(); $("stories").showModal(); };
   $("close-stories").onclick = () => $("stories").close();
+  $("tour").onclick = () => startTour();
+  $("open-challenge").onclick = openChallenge;
+  $("challenge-close").onclick = () => $("challenge").close();
+  $("attack-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = $("attack-msg").value;
+    $("attack-msg").value = "";
+    attack(v);
+  });
+  $("xray-close").onclick = () => $("xray").close();
   $("play-all").onclick = () => { $("stories").close(); runStories(stories.map((s) => s.id)); };
   $("cap-pause").onclick = () => { pilot.paused = !pilot.paused; $("cap-pause").textContent = pilot.paused ? "Resume" : "Pause"; };
   $("cap-stop").onclick = () => { pilot.stop = true; pilot.paused = false; };
@@ -1043,6 +1370,8 @@ async function init() {
   // Recording helper: /?story=A6 (or ?story=all) plays stories on load; &speed=500|1400|2600.
   const q = new URLSearchParams(location.search);
   if (q.get("speed")) $("speed").value = q.get("speed");
+  if (q.get("present")) document.body.classList.add("presenter");
+  if (q.get("tour")) { startTour(q.get("speed") ? Number(q.get("speed")) : undefined); return; }
   if (q.get("story")) {
     const ids = q.get("story") === "all" ? stories.map((s) => s.id) : q.get("story").split(",").filter((id) => stories.some((s) => s.id === id));
     if (ids.length) runStories(ids);

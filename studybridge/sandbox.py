@@ -8,11 +8,15 @@ the model, and ACTOR_ACTIONS decides who may do what.
 import copy
 import json
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
+from . import state as saved_state
 from .agent import AgentResponse, StudentFinanceAgent
 from .clock import SandboxClock
 from .llm import LLMError
+from .config import HOME_CURRENCY
+from .money import convert_mid, q
 from .security.audit import AuditLog
 from .security.permissions import Tier, actor_allowed
 from .stories import STORY_BY_ID, STORIES
@@ -44,9 +48,17 @@ class DisagreeingLLM:
 SIMULATED_LLMS = {"malformed": MalformedLLM, "disagree": DisagreeingLLM}
 
 
+FRAUD_CODES = ("PAYEE_NOT_VERIFIED", "ACCOUNT_CHANGED", "INJECTION_DETECTED")
+
+
+def new_impact() -> dict:
+    return {"protected_bdt": Decimal(0), "scams": [], "fees_saved_bdt": Decimal(0)}
+
+
 class Sandbox:
     def __init__(self, profile_path, audit: AuditLog, llm=None, tier: Tier = Tier.TRANSACT,
-                 start: datetime = None, ticking: bool = False, narrate: bool = True, llm_client=None):
+                 start: datetime = None, ticking: bool = False, narrate: bool = True, llm_client=None,
+                 state_path=None):
         self.profile_path = Path(profile_path)
         self.audit = audit
         self.llm = llm                          # the model in use now (None = rules-only)
@@ -57,7 +69,28 @@ class Sandbox:
         self.narrate = narrate
         self.story_ctx = {}
         self.agent = None
+        self.impact = new_impact()
+        self.state_path = Path(state_path) if state_path else None
         self.reset()
+        self._restore_state()
+
+    def _restore_state(self):
+        if self.state_path is None or not self.state_path.exists():
+            return
+        try:
+            saved_state.load_file(self, self.state_path)
+            self.audit.append("state_restored", {"file": self.state_path.name})
+        except Exception as e:                      # fail safe: an unreadable file means a fresh sandbox
+            self.reset()
+            self.audit.append("state_restore_failed", {"file": self.state_path.name, "error": type(e).__name__})
+
+    def _save_state(self):
+        if self.state_path is None:
+            return
+        try:
+            saved_state.save_file(self, self.state_path)
+        except Exception as e:
+            self.audit.append("state_save_failed", {"file": self.state_path.name, "error": type(e).__name__})
 
     def reset(self, setup: dict = None) -> AgentResponse:
         setup = setup or {}
@@ -76,6 +109,29 @@ class Sandbox:
 
     # ------------------------------------------------------------ the single entry point
     def act(self, actor: str, action: str, args: dict = None) -> AgentResponse:
+        resp = self._act(actor, action, args)
+        self._tally(action, args or {}, resp)
+        self._save_state()
+        return resp
+
+    def _tally(self, action: str, args: dict, resp: AgentResponse):
+        """Impact counter. Counts only what the code already decided; it never influences a decision.
+        Each scam is counted once (by invoice id, or by message text when no invoice is named)."""
+        i = self.impact
+        a = self.agent
+        case = a.cases.get(resp.case_id) if resp.case_id else None
+        if action == "chat" and resp.blocked and resp.code in FRAUD_CODES:
+            inv_id = case.get("invoice_id") if case else None
+            key = inv_id or "msg:" + " ".join(str(args.get("message", "")).lower().split())[:120]
+            if key not in i["scams"]:
+                i["scams"].append(key)
+                inv = a.book.invoices.get(inv_id) if inv_id else None
+                if inv is not None and not (resp.code == "INJECTION_DETECTED"):
+                    i["protected_bdt"] += q(convert_mid(inv["amount"], inv["currency"], HOME_CURRENCY))
+        if action == "confirm" and resp.code == "EXECUTED" and case and case.get("saving_bdt"):
+            i["fees_saved_bdt"] += Decimal(case["saving_bdt"])
+
+    def _act(self, actor: str, action: str, args: dict = None) -> AgentResponse:
         args = args or {}
         a = self.agent
         if action == "chat":
@@ -111,6 +167,7 @@ class Sandbox:
             if action == "set_llm":
                 return self._set_llm(args.get("on") is True)
             if action == "reset":
+                self.impact = new_impact()          # only the operator's Reset clears the counters
                 return self.reset()
             if action == "advance_clock":
                 try:
@@ -186,4 +243,8 @@ class Sandbox:
                  "setup": s.setup} for s in STORIES]
 
     def snapshot(self) -> dict:
-        return {**self.agent.snapshot(), "llm_switch": self.llm_client is not None}
+        i = self.impact
+        return {**self.agent.snapshot(), "llm_switch": self.llm_client is not None,
+                "impact": {"protected_bdt": q(i["protected_bdt"]), "scams_stopped": len(i["scams"]),
+                           "fees_saved_bdt": q(i["fees_saved_bdt"]),
+                           "label": "sandbox session, computed by the code, not typed in"}}

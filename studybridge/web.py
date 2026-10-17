@@ -10,6 +10,8 @@ CSRF); request bodies are capped at 8 KB; responses carry a strict CSP and
 the page renders all text with textContent, never innerHTML. The role
 switch is a sandbox demo control: there is no user login (known risk).
 """
+import base64
+import hmac
 import json
 import os
 import shutil
@@ -20,6 +22,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import PACKAGE_ROOT
+from .challenge import ATTACKS
 from .security.audit import AuditLog
 from .stories import STORY_BY_ID
 
@@ -36,6 +39,7 @@ def _allowed_hosts() -> set:
 _FILES = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
           "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
+          "/reasons_bn.js": ("reasons_bn.js", "text/javascript; charset=utf-8"),
           "/style.css": ("style.css", "text/css; charset=utf-8"),
           "/favicon.svg": ("favicon.svg", "image/svg+xml")}
 
@@ -54,7 +58,14 @@ def _audit_tail(path: Path, n: int = 40) -> list:
 
 def _tamper_test(path: Path) -> dict:
     """Change one character in a COPY of the log and verify it. The real log is never touched."""
-    tmp = Path(tempfile.mkdtemp()) / "audit_copy.jsonl"
+    work = Path(tempfile.mkdtemp())
+    try:
+        return _tamper_in(path, work / "audit_copy.jsonl")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _tamper_in(path: Path, tmp: Path) -> dict:
     shutil.copy(path, tmp)
     lines = tmp.read_text(encoding="utf-8").splitlines()
     idx = next((i for i in range(len(lines) - 1, -1, -1) if '"event":"executed"' in lines[i]), len(lines) // 2)
@@ -71,14 +82,18 @@ def _tamper_test(path: Path) -> dict:
 def _make_handler(sandbox):
     lock = threading.Lock()
     allowed = _allowed_hosts()
+    # Optional gate for a public demo: HTTP Basic with a shared password (any user name). Not a user login.
+    password = os.environ.get("STUDYBRIDGE_DEMO_PASSWORD") or None
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
 
-        def _send(self, code, body: bytes, ctype="application/json"):
+        def _send(self, code, body: bytes, ctype="application/json", headers=()):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            for k, v in headers:
+                self.send_header(k, v)
             self.send_header("Content-Security-Policy",
                              "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -101,9 +116,27 @@ def _make_handler(sandbox):
                 return False
             return True
 
+        def _authorized(self) -> bool:
+            if password is None:
+                return True
+            try:
+                kind, _, token = (self.headers.get("Authorization") or "").partition(" ")
+                if kind.lower() != "basic":
+                    return False
+                given = base64.b64decode(token.strip()).decode("utf-8").partition(":")[2]
+            except (ValueError, UnicodeDecodeError):
+                return False
+            return hmac.compare_digest(given.encode(), password.encode())
+
+        def _need_password(self):
+            return self._send(401, b'{"error": "password required"}',
+                              headers=[("WWW-Authenticate", 'Basic realm="StudyBridge demo", charset="UTF-8"')])
+
         def do_GET(self):
             if not self._local():
                 return self._json(403, {"error": "unexpected host"})
+            if not self._authorized():
+                return self._need_password()
             self.path = urlsplit(self.path).path
             if self.path in _FILES:
                 name, ctype = _FILES[self.path]
@@ -113,6 +146,8 @@ def _make_handler(sandbox):
                     return self._json(200, sandbox.snapshot())
                 if self.path == "/api/stories":
                     return self._json(200, sandbox.stories())
+                if self.path == "/api/attacks":
+                    return self._json(200, ATTACKS)
                 if self.path == "/api/audit/tail":
                     return self._json(200, _audit_tail(sandbox.audit.path))
                 if self.path == "/api/audit/verify":
@@ -122,6 +157,8 @@ def _make_handler(sandbox):
         def do_POST(self):
             if not self._local(post=True):
                 return self._json(403, {"error": "unexpected host or origin"})
+            if not self._authorized():
+                return self._need_password()
             if self.headers.get("X-StudyBridge") != "1" or \
                     not self.headers.get("Content-Type", "").startswith("application/json"):
                 return self._json(403, {"error": "missing required header"})

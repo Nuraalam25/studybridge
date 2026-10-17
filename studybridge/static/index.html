@@ -31,6 +31,12 @@
       <button type="button" class="tool" id="llm" aria-pressed="false" title="Switch Qwen on or off. Off means rules-only mode.">
         <span class="ic" data-icon="spark"></span><span id="llm-label">Qwen: —</span>
       </button>
+      <button type="button" class="tool tour" id="tour" title="A guided three-minute run of five real situations, ending with the tamper test">
+        <span class="ic" data-icon="play"></span><span>Judge tour</span>
+      </button>
+      <button type="button" class="tool" id="open-challenge" title="Try to trick the assistant: pick an attack or type your own">
+        <span class="ic" data-icon="lock"></span><span>Try to scam it</span>
+      </button>
       <button type="button" class="tool" id="open-stories">
         <span class="ic" data-icon="play"></span><span>Play stories</span>
       </button>
@@ -70,6 +76,13 @@
       <button type="button" id="cap-stop" class="btn small">Stop</button>
     </div>
   </div>
+
+  <section class="impact floating" id="impact" aria-label="Impact in this sandbox session">
+    <div class="imp"><span class="num" id="imp-protected">BDT 0</span><span class="lbl">protected from wrong accounts</span></div>
+    <div class="imp"><span class="num" id="imp-scams">0</span><span class="lbl">scams stopped</span></div>
+    <div class="imp"><span class="num" id="imp-fees">BDT 0</span><span class="lbl">saved vs a bank wire</span></div>
+    <span class="imp-tag" title="Computed by the code from what happened in this session. Reset clears it.">sandbox session · computed, not typed in</span>
+  </section>
 
   <nav class="tabs floating" aria-label="Screens">
     <button type="button" data-tab="student" class="active">Student</button>
@@ -144,6 +157,8 @@
           <select id="case-select" aria-label="Choose a request" hidden></select>
         </div>
         <div id="case-title" class="route-head"></div>
+        <div id="route-map" class="route-map" aria-label="Money route"></div>
+        <div id="case-xray" class="case-xray"></div>
         <ol id="pipeline" class="route"></ol>
       </div>
 
@@ -183,6 +198,11 @@
       <div class="sheet-body">
         <h3 class="sec"><span data-i18n="inbox">Approval inbox</span> <span id="inbox-count" class="count"></span></h3>
         <div id="inbox" class="inbox"></div>
+
+        <div class="group">
+          <h4 data-i18n="alerts">Stopped for your student</h4>
+          <ul id="alerts" class="alerts"></ul>
+        </div>
 
         <div class="group">
           <div class="row-between">
@@ -230,6 +250,42 @@
     <div id="story-list" class="story-list"></div>
   </dialog>
 
+  <dialog id="challenge" aria-label="Try to scam StudyBridge">
+    <div class="dlg-head">
+      <div>
+        <h2>Try to scam StudyBridge</h2>
+        <p class="muted">Pick an attack or type your own. It goes through the same chat as the student's, so every gate, permission and actor check applies.</p>
+      </div>
+      <button type="button" id="challenge-close" class="btn" aria-label="Close">Close</button>
+    </div>
+    <div id="challenge-tier" class="challenge-tier" hidden></div>
+    <div class="score" id="score" role="status" aria-live="polite">
+      <div><b id="sc-attempts">0</b><span>attempts</span></div>
+      <div class="s-stop"><b id="sc-stopped">0</b><span>stopped</span></div>
+      <div class="s-wait"><b id="sc-waiting">0</b><span>waiting for the family</span></div>
+      <div class="s-ready"><b id="sc-ready">0</b><span>waiting for the student</span></div>
+      <div class="s-moved"><b id="sc-moved">0</b><span>money moved without both</span></div>
+    </div>
+    <div id="attacks" class="attacks"></div>
+    <form id="attack-form" class="attack-form">
+      <input id="attack-msg" autocomplete="off" maxlength="300" placeholder="Or write your own attack, in any words" aria-label="Your own attack">
+      <button type="submit" class="btn primary">Attack</button>
+    </form>
+    <ul id="attempts" class="attempts"></ul>
+    <p class="small muted">Chat can only prepare a payment. It moves only when the family has approved and the student presses Confirm. Nothing here is real money.</p>
+  </dialog>
+
+  <dialog id="xray" aria-label="Invoice X-ray">
+    <div class="dlg-head">
+      <div>
+        <h2>Invoice X-ray</h2>
+        <p class="muted">What the code found on this bill. It only shows the checks; it does not change them.</p>
+      </div>
+      <button type="button" id="xray-close" class="btn" aria-label="Close">Close</button>
+    </div>
+    <div id="xray-body"></div>
+  </dialog>
+
   <dialog id="raise" aria-label="Ask to raise my limit">
     <form id="raise-form" class="raise-form">
       <h2>Ask to raise my limit</h2>
@@ -253,6 +309,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/i18n.js"></script>
+  <script src="/reasons_bn.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -31,10 +31,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time as dtime
 from decimal import Decimal
 
-from . import budget, credit, fx, remittance, tuition
+from . import bangla, budget, credit, fx, remittance, tuition
 from .clock import SandboxClock
-from .config import (CONFIRM_TTL_SECONDS, CURRENCY_ALIASES, EXEMPT_TYPES, HOME_CURRENCY, LIMITS, PAYMENT,
-                     RATE_SOURCE, WALLET_FX_SPREAD)
+from .config import (CONFIRM_LOCK_SECONDS, CONFIRM_MAX_FAILS, CONFIRM_TTL_SECONDS, CURRENCY_ALIASES, EXEMPT_TYPES,
+                     HOME_CURRENCY, LIMITS, PAYMENT, RATE_SOURCE, WALLET_FX_SPREAD)
 from .llm import LLMError
 from .money import D, convert_mid, fmt, mid_rate, norm_ccy, q, to_usd
 from .payments import DOC_ID, PaymentBook
@@ -190,8 +190,11 @@ class StudentFinanceAgent:
         if clock is None:
             clock = SandboxClock(datetime.combine(today, dtime(9, 0))) if today else SandboxClock(ticking=True)
         self.clock = clock
+        if hasattr(audit, "clock"):
+            audit.clock = clock        # audit records carry the sandbox time too
         self.narrate = narrate
         self.pending = {}
+        self._confirm_failures = []     # sandbox-clock times of confirmations with an unknown id (R11)
         self.book = PaymentBook(wallet.profile, clock, payees=wallet.beneficiaries)
         self.cases = OrderedDict()
         self._payee_candidates = []
@@ -263,30 +266,34 @@ class StudentFinanceAgent:
         def has(*words):
             return any(re.search(r"\b" + w + r"\b", m) for w in words)
 
-        paying = has("pay", "send", "transfer", "settle", "buy")
-        if has("help", "what can you do"):
+        paying = has("pay", "send", "transfer", "settle", "buy") or bangla.pays(m)
+        if has("help", "what can you do") or bangla.says(m, bangla.HELP[:3], bangla.HELP[3:]):
             intent = "help"
-        elif has("status", "pending", "approvals", "waiting", "allowances", "invoices", "bills"):
+        elif has("status", "pending", "approvals", "waiting", "allowances", "invoices", "bills") \
+                or bangla.says(m, ("obostha",), ("অবস্থা", "অপেক্ষমাণ")):
             intent = "payment_status"
-        elif has("allowance"):
+        elif has("allowance") or bangla.says(m, ("onumoti",), ("অনুমতি",)):
             intent = "request_allowance"
         elif doc_ids and paying:
             intent = "pay"
         elif has("compare", "cheapest", "best way", "which provider", "which service", "remit", "remittance"):
             intent = "compare_remittance"
-        elif has("tuition") and not has("send", "transfer") and not (has("pay") and amounts):
+        elif (has("tuition") or bangla.says(m, (), bangla.TUITION)) and not has("send", "transfer") \
+                and not ((has("pay") or paying) and amounts):
             intent = "tuition_plan"
         elif paying and (amounts or payee or payees or has("all", "everything", "it", "this", "that", "bill")):
             intent = "pay"
-        elif has("convert", "exchange") and amounts:
+        elif (has("convert", "exchange") or bangla.says(m, ("convert koro", "exchange koro"), bangla.CONVERT)) and amounts:
             intent = "convert_currency"
         elif has("credit"):
             intent = "credit_plan"
         elif has("spend", "spending", "spent", "budget", "expense", "expenses", "runway", "burn"):
             intent = "spending_insights"
-        elif has("rate", "quote", "worth") or (amounts and src and dst):
+        elif has("rate", "quote", "worth") or bangla.says(m, ("rate koto", "dam", "dor"), ("রেট", "দর", "দাম")) \
+                or (amounts and src and dst):
             intent = "fx_quote"
-        elif has("balance", "balances", "wallet", "overview"):
+        elif has("balance", "balances", "wallet", "overview") \
+                or bangla.says(m, ("koto ache", "koto achhe", "koto taka"), ("কত আছে", "কত টাকা আছে", "ব্যালেন্স", "ওয়ালেট")):
             intent = "wallet_overview"
         else:
             intent = "help"
@@ -403,7 +410,7 @@ class StudentFinanceAgent:
                                 "The message contains instruction-override, approval-skipping or 'send "
                                 "everything' wording, so no money action will be prepared from it.",
                                 message, step="2", source=source)
-        if intent not in MONEY_MOVING and _APPROVE.search(message):
+        if intent not in MONEY_MOVING and (_APPROVE.search(message) or bangla.APPROVE_SAYING.search(message)):
             return self._refuse(case, intent, "ACTOR_NOT_PERMITTED",
                                 "The assistant cannot approve anything, and chat text cannot change who is "
                                 "acting. Approvals are made only on the family's own screen.",
@@ -676,8 +683,9 @@ class StudentFinanceAgent:
             best = remittance.evaluate(p, send_amt, src, ccy)
             return {"method": "remit", "cost_home": send_amt, "send_amount": send_amt, "src": src,
                     "provider_id": p["id"], "provider": best["provider"], "fee": best["fee"],
-                    "recipient_gets": best["recipient_gets"]}
-        return {"method": "card", "cost_home": fx.cost_to_deliver(amt, HOME_CURRENCY, ccy), "src": HOME_CURRENCY}
+                    "recipient_gets": best["recipient_gets"], "applied_rate": best["applied_rate"]}
+        return {"method": "card", "cost_home": fx.cost_to_deliver(amt, HOME_CURRENCY, ccy), "src": HOME_CURRENCY,
+                "applied_rate": mid_rate(HOME_CURRENCY, ccy) * (1 - WALLET_FX_SPREAD)}
 
     def _guardrails(self, pay: dict, funding: dict, checks: list):
         """Existing guardrails: BDT hard caps and the wallet balance."""
@@ -691,7 +699,8 @@ class StudentFinanceAgent:
 
         lim = self.policy.check_amount(cost, self.session, self.today)
         if not lim.allowed:
-            fail("ABOVE_HARD_CAP", "BDT hard caps", f"Funding this needs about BDT {cost:,.2f}; {lim.reason}.")
+            fail("AMOUNT_NOT_POSITIVE" if cost <= 0 else "ABOVE_HARD_CAP", "BDT hard caps",
+                 f"Funding this needs about BDT {cost:,.2f}; {lim.reason}.")
         checks.append({"check": "BDT hard caps", "ok": True,
                        "detail": f"BDT {cost:,.2f} ≤ BDT {LIMITS['per_tx_home']:,} per payment"})
         bal = self.wallet.balances.get(HOME_CURRENCY, Decimal(0))
@@ -710,8 +719,10 @@ class StudentFinanceAgent:
         except PaymentBlocked as b:
             if case is not None:
                 case["checks"] = getattr(b, "checks", [])
+                case["invoice_id"] = invoice_id.upper() if invoice_id else None
             raise
         if case is not None:
+            case["invoice_id"] = invoice_id.upper() if invoice_id else None
             case["checks"] = checks
             case["payment"] = _to_jsonable({k: pay[k] for k in ("invoice_id", "payee_name", "payee_type",
                                                                  "amount", "currency", "purpose")})
@@ -830,6 +841,13 @@ class StudentFinanceAgent:
         op = {"kind": funding["method"], "payee_id": pay["payee_id"], "invoice_id": pay["invoice_id"],
               "amount": str(pay["amount"]), "currency": pay["currency"], "request_id": request_id,
               "allowance_id": allowance_id, "counts_family": counts_family, "month": self.book.bill_month(pay)}
+        if case is not None:
+            # View data for the money-route map: which way the money would travel, at what fee and rate.
+            rate = funding.get("applied_rate")
+            case["funding"] = {
+                "provider": funding.get("provider") or "Family-funded card",
+                "fee_bdt": str(q(funding["fee"])) if funding.get("fee") is not None else None,
+                "bdt_per_unit": str(q(1 / rate)) if rate else None, "currency": pay["currency"]}
         what = f"{fmt(pay['amount'], pay['currency'])} to {pay['payee_name']}"
         if pay["invoice_id"]:
             what += f" for {pay['invoice_id']} ({pay['purpose']})"
@@ -847,8 +865,8 @@ class StudentFinanceAgent:
                  warnings=()) -> AgentResponse:
         limit = self.policy.check_amount(amount_home, self.session, self.today)
         if not limit.allowed:
-            return self._refuse(case, tool, "ABOVE_HARD_CAP", f"Not permitted: {limit.reason}.", message or "",
-                                step="4")
+            code = "AMOUNT_NOT_POSITIVE" if amount_home <= 0 else "ABOVE_HARD_CAP"
+            return self._refuse(case, tool, code, f"Not permitted: {limit.reason}.", message or "", step="4")
         action_id = secrets.token_hex(6)
         self.pending[action_id] = {"id": action_id, "tool": tool, "op": op, "summary": summary,
                                    "amount_home": amount_home, "case_id": case["id"] if case else None,
@@ -877,6 +895,9 @@ class StudentFinanceAgent:
     def _do_convert_currency(self, args, message, case=None):
         if args["amount"] is None or not args["from_currency"] or not args["to_currency"]:
             raise ValueError("say the amount and both currencies, e.g. 'convert 20000 BDT to CNY'")
+        if args["amount"] <= 0:
+            return self._refuse(case, "convert_currency", "AMOUNT_NOT_POSITIVE",
+                                "Not permitted: amount must be positive.", message or "", step="4")
         qt = fx.quote(args["amount"], args["from_currency"], args["to_currency"])
         summary = (f"convert {fmt(qt['amount'], qt['from'])} to {fmt(qt['you_get'], qt['to'])} "
                    f"at {qt['applied_rate']}")
@@ -1186,8 +1207,16 @@ class StudentFinanceAgent:
     def confirm(self, action_id: str, actor: str = "student") -> AgentResponse:
         if not actor_allowed(actor, "confirm"):
             return self._actor_refused(actor, "confirm")
+        now = self.clock.ts()
+        self._confirm_failures = [t for t in self._confirm_failures if now - t < CONFIRM_LOCK_SECONDS]
+        if len(self._confirm_failures) >= CONFIRM_MAX_FAILS:
+            self.audit.append("confirm_rejected", {"id": action_id, "reason": "locked after repeated unknown ids"})
+            return AgentResponse("Confirming is locked for a minute after too many wrong confirmation ids.",
+                                 "confirm", blocked=True, code="CONFIRMATION_LOCKED",
+                                 fix=fix_for("CONFIRMATION_LOCKED"))
         action = self.pending.pop(action_id, None)
         if action is None:
+            self._confirm_failures.append(now)
             self.audit.append("confirm_rejected", {"id": action_id, "reason": "unknown id"})
             return AgentResponse("No pending action with that id. It may have been used already (replay refused).",
                                  "confirm", blocked=True, code="CONFIRMATION_INVALID",
@@ -1205,7 +1234,8 @@ class StudentFinanceAgent:
         limit = self.policy.check_amount(action["amount_home"], self.session, self.today)
         if not (decision.allowed and limit.allowed):
             reason = decision.reason if not decision.allowed else limit.reason
-            code = "TIER_TOO_LOW" if not decision.allowed else "ABOVE_HARD_CAP"
+            code = ("TIER_TOO_LOW" if not decision.allowed
+                    else "AMOUNT_NOT_POSITIVE" if action["amount_home"] <= 0 else "ABOVE_HARD_CAP")
             self.audit.append("confirm_rejected", {"id": action_id, "reason": reason})
             self._step(case, "10", "fail", f"{code}: {reason}")
             return self._finish(case, AgentResponse(f"Not executed: {reason}.", "confirm", blocked=True, code=code,
@@ -1243,6 +1273,11 @@ class StudentFinanceAgent:
                 self.book.consume_allowance(op["allowance_id"], op.get("month"))
             self.book.record_payment(op["payee_id"], D(op["amount"]), counts_family=op.get("counts_family", False),
                                      card=op["kind"] == "card")
+        if op.get("kind") == "remit" and case is not None:
+            # View data for the impact counter: what the same transfer would have cost as a bank wire.
+            bank = remittance.provider_by_id("bank_swift")
+            wire = q(remittance.source_needed(bank, D(op["amount"]), op["src"], op["currency"]))
+            case["saving_bdt"] = str(q(wire - D(op["send_amount"])))
         self.audit.append("executed", {"id": action_id, "tool": action["tool"], "record": _to_jsonable(rec)})
         self._step(case, "10", "pass", f"Re-checked {n_checks} gate checks, tier, caps; executed once "
                                        f"({rec.get('sandbox_reference', rec.get('type'))}).")
@@ -1280,7 +1315,7 @@ class StudentFinanceAgent:
                           if self.session.spent_on == self.today else q(0)},
             "pending": [{"id": a["id"], "summary": a["summary"], "case_id": a.get("case_id"),
                          "seconds_left": max(0, int(a["expires"] - now)), "ttl": CONFIRM_TTL_SECONDS}
-                        for a in self.pending.values()],
+                        for a in self.pending.values() if now <= a["expires"]],
             "pipeline": [{"key": k, "who": w, "title": t} for k, w, t in PIPELINE],
             "cases": list(self.cases.values())[-15:],
         })

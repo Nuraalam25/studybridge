@@ -18,6 +18,7 @@ from .config import EXEMPT_TYPES, PAYEE_TYPES, PAYMENT
 from .money import D, convert_mid, q, to_usd
 from .reasons import PaymentBlocked
 from .security.audit import mask_account
+from . import xray
 
 DOC_ID = re.compile(r"\b(?:INV|RENT|Q)-[A-Z0-9]+(?:-[A-Z0-9]+)*\b", re.IGNORECASE)
 
@@ -554,6 +555,19 @@ class PaymentBook:
         self.documents[key]["ready"] = bool(ready)
 
     # ------------------------------------------------------------ views
+    def _xray(self, inv: dict) -> dict:
+        """View data for the invoice X-ray. It re-reads what Gate 1 finds and never changes it."""
+        payee = self.payees[inv["payee_id"]]
+        code = None
+        if inv["status"] != "paid":
+            try:
+                self.gate1(inv["id"])
+            except PaymentBlocked as b:
+                code = b.code
+        owner = self._owner_of(inv.get("account_number"))
+        owner_name = owner["name"] if owner and owner is not payee else None
+        return xray.build(inv, payee, owner_name, code)
+
     def snapshot(self) -> dict:
         self.expire()
         now = self.clock.ts()
@@ -588,7 +602,8 @@ class PaymentBook:
                           "purpose": i["purpose"], "amount": q(i["amount"]), "currency": i["currency"],
                           "due": i.get("due"), "status": i["status"],
                           "account": mask_account(i["account_number"]) if i.get("account_number") else None,
-                          "account_ok": i.get("account_number") == self.payees[i["payee_id"]].get("account_number")}
+                          "account_ok": i.get("account_number") == self.payees[i["payee_id"]].get("account_number"),
+                          "xray": self._xray(i)}
                          for i in self.invoices.values()],
             "documents": [{"key": k, **v} for k, v in self.documents.items()],
             "requests": [{**{k: v for k, v in r.items() if not k.endswith("_ts")}, "seconds_left": req_left(r)}

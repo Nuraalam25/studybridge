@@ -15,6 +15,8 @@ CURRENCY_ALIASES = {
     "USD": "USD", "DOLLAR": "USD", "DOLLARS": "USD", "$": "USD",
     "THB": "THB", "BAHT": "THB",
     "EUR": "EUR", "EURO": "EUR", "EUROS": "EUR", "€": "EUR",
+    # Bangla script (first draft; see bangla.py)
+    "টাকা": "BDT", "ইউয়ান": "CNY", "রেনমিনবি": "CNY", "ডলার": "USD",
 }
 
 # Units of each currency per 1 USD (sandbox mid-market snapshot).
@@ -65,6 +67,8 @@ LIMITS = {
     "daily_home": D("600000"),
 }
 CONFIRM_TTL_SECONDS = 120          # the student's final confirmation: 2 minutes, single use
+CONFIRM_MAX_FAILS = 5              # unknown confirmation ids within the window before confirming is locked
+CONFIRM_LOCK_SECONDS = 60          # the window, and how long the lock lasts (sandbox clock)
 
 # Payment settings (plan v3). All are ASSUMPTIONS (team design, illustrative).
 # The bank limit is applied as a DAILY total of card spending: a team design

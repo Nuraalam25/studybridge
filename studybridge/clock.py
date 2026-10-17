@@ -27,3 +27,7 @@ class SandboxClock:
 
     def advance(self, hours: float = 0, minutes: float = 0):
         self._offset += timedelta(hours=hours, minutes=minutes)
+
+    def set(self, now: datetime):
+        """Continue from `now` (used when a saved state is loaded)."""
+        self._start, self._real0, self._offset = now, time.time(), timedelta(0)

@@ -56,6 +56,7 @@ REASONS = {
                                 "Use an open allowance first, or ask the family to cancel one."),
     "APPROVAL_EXPIRED": ("The family approval window has passed.", "Request again."),
     # Existing guardrails
+    "AMOUNT_NOT_POSITIVE": ("The amount to pay is zero or negative.", "Enter an amount above zero."),
     "ABOVE_HARD_CAP": ("The payment is above the BDT per-payment or daily hard cap.", "Lower or wait."),
     "INSUFFICIENT_BALANCE": ("The wallet does not hold enough to fund this payment.", "Lower or wait."),
     # Security
@@ -75,6 +76,8 @@ REASONS = {
     "NOT_FOUND": ("No such request, allowance or document.", "Check the id."),
     "CONFIRMATION_INVALID": ("No open confirmation has that id. It may have been used already.",
                              "Start the payment again."),
+    "CONFIRMATION_LOCKED": ("Too many confirmations with an unknown id in a short time, so confirming is locked.",
+                            "Wait a minute, then start the payment again."),
     "CONFIRMATION_EXPIRED": ("The 2-minute confirmation window passed.", "Start the payment again."),
     "TOOL_ERROR": ("The request could not be completed.", "Check the request and try again."),
     "LLM_UNAVAILABLE": ("Qwen is not running on this computer, so it cannot be switched on.",

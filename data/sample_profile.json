@@ -28,7 +28,9 @@
         "university",
         "uni",
         "tuition office",
-        "school"
+        "school",
+        "বিশ্ববিদ্যালয়",
+        "ইউনিভার্সিটি"
       ],
       "phone_on_file": "+86 755 5550 0100"
     },
@@ -42,7 +44,9 @@
       "aliases": [
         "landlord",
         "rent",
-        "dorm"
+        "dorm",
+        "বাড়িওয়ালা",
+        "ভাড়া"
       ],
       "phone_on_file": "+86 755 5550 0101"
     },
@@ -56,7 +60,8 @@
       "aliases": [
         "techmart",
         "tech mart",
-        "appliance shop"
+        "appliance shop",
+        "টেকমার্ট"
       ],
       "phone_on_file": "+86 755 5550 0102"
     },
@@ -81,7 +86,8 @@
       "verified": true,
       "aliases": [
         "canteen",
-        "dining hall"
+        "dining hall",
+        "ক্যান্টিন"
       ]
     },
     {
@@ -91,7 +97,8 @@
       "currency": "CNY",
       "verified": true,
       "aliases": [
-        "bubble tea"
+        "bubble tea",
+        "বাবল টি"
       ]
     },
     {

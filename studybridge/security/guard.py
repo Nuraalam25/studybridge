@@ -26,7 +26,14 @@ _INJECTION = re.compile(
     r"you are now|developer mode|\bjailbreak\b|transfer (all|everything)|send (all|everything)|"
     r"new instruction|act as|override|ignore (your|the|these|my) (rules|instructions|limits)|"
     r"without (the )?(family )?(approval|confirmation)|skip (the )?(family|approval|confirmation|check)|"
-    r"\bbypass\b|pre-?approved|note to (the )?assistant",
+    r"\bbypass\b|pre-?approved|note to (the )?assistant|"
+    # Banglish and Bangla versions of the same tricks
+    r"(approval|onumodon|confirm|check)\s+(chara|charai|lagbe na|ni(y|)e)|"
+    r"(family|poribar|poribarke|abba|amma|baba|ma)\s*(ke)?\s*(na|bina)\s*(jan(i|ie)y|bol(e|a))|"
+    r"(shob|sob|sokol|puro)\s+(taka|balance)\s+(pathao|pathiye|transfer)|"
+    r"(niyom|rules?|instruction|nirdesh)\w*\s+(ignore|bhule|vule|na mane)|"
+    r"(ager|purber|aager)\s+(shob\s+)?(niyom|nirdesh|instruction)|bhule\s+jao|vule\s+jao|"
+    r"অনুমোদন\s*ছাড়া|পরিবারকে\s*না\s*জানিয়ে|সব\s*টাকা\s*পাঠা|নিয়ম\s*(ভুলে|উপেক্ষা)|আগের\s*(সব\s*)?(নির্দেশ|নিয়ম)",
     re.IGNORECASE,
 )
 
@@ -41,6 +48,20 @@ _PRESSURE = re.compile(
 
 def looks_like_injection(text: str) -> bool:
     return bool(text) and bool(_INJECTION.search(text))
+
+
+def flag_spans(text: str) -> list:
+    """(start, end, kind) for every pressure phrase and injection phrase in text, in order, not overlapping.
+    View data for the invoice X-ray: it marks what the detectors already found and decides nothing."""
+    spans = [(m.start(), m.end(), "pressure") for m in _PRESSURE.finditer(text or "")]
+    spans += [(m.start(), m.end(), "injection") for m in _INJECTION.finditer(text or "")]
+    spans.sort()
+    out, last = [], 0
+    for a, b, kind in spans:
+        if a >= last:
+            out.append((a, b, kind))
+            last = b
+    return out
 
 
 def pressure_signals(text: str) -> list:
