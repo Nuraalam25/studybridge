@@ -105,3 +105,6 @@ EXEMPT_TYPES = {"qr_merchant", "food"}
 
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
+# Hosted option (Groq free tier, OpenAI-style API). The model id must match the provider's model list; `available()`
+# checks it. The local call budget stays under Groq's free limits (30 requests a minute, 1,000 a day, read 16 Oct 2026).
+HOSTED_LLM = {"url": "https://api.groq.com/openai/v1", "model": "qwen/qwen3.8-27b", "per_minute": 20, "per_day": 800}

@@ -1,6 +1,6 @@
 # StudyBridge — Technical Documentation
 
-Topic C: Cross-border & Student Finance Assistant · version 0.4.0 (plan v4: three-gate safe payments)
+Topic C: Cross-border & Student Finance Assistant · version 0.5.0 (plan v4: three-gate safe payments)
 
 Labels used below: **BUILT** (in this code), **ASSUMPTION** (team design, illustrative), **TEAM-STATED** (a teammate's experience, no public source found), **VERIFIED** (public source; see the plan's fact check).
 
@@ -88,8 +88,8 @@ Key design decisions:
 | Decision | Reason |
 |---|---|
 | The LLM never computes a number | Our earlier work with a 7B model showed frequent arithmetic, unit and labelling errors. Deterministic code is exact and testable. |
-| The LLM is optional | Everything works rules-only, so the system degrades gracefully, tests are deterministic, and no data has to leave the device. The demo operator can switch Qwen on and off from the top bar; switching on fails closed (`LLM_UNAVAILABLE`) if Ollama does not answer. BUILT |
-| Local model (Ollama) | Financial data stays on the machine; no third-party API key is needed. |
+| The LLM is optional | Everything works rules-only, so the system degrades gracefully, tests are deterministic, and no data has to leave the device. The demo operator can switch Qwen on and off from the top bar; switching on fails closed (`LLM_UNAVAILABLE`, with the reason) if the model does not answer. BUILT |
+| Local model (Ollama) first, hosted Qwen optional | Locally, financial data stays on the machine and no key is needed. A public demo has no Ollama, so a hosted OpenAI-style API (Groq free tier) can be used; see 3.10. |
 | Standard library only | No supply-chain risk from dependencies; easy to audit and deploy. |
 | `Decimal` everywhere | Floats are never used for balances. |
 
@@ -485,6 +485,27 @@ as before.
   must end as its `expect` field says with no money moved), the checker on the 8 quiz messages, one safe-word sequence
   and one new-payee sequence.
 
+### 3.10 Hosted model option (v0.5, 18 October)
+
+`llm.py` has a second client, `OpenAICompatClient`, for a hosted OpenAI-style API. `make_client` chooses it when a URL
+(`--llm-url`, `STUDYBRIDGE_LLM_URL`) or a key (`STUDYBRIDGE_LLM_KEY`, `GROQ_API_KEY`) is set, and Ollama otherwise. Nothing
+else changed: the same prompts, the same schema check, slot filler, guard and agreement rule apply to either model.
+
+- **Availability** is checked when Qwen is switched on: the key is set, `/models` answers and lists the model id. The
+  refusal (`LLM_UNAVAILABLE`) names which of these failed.
+- **JSON** is requested with `response_format: json_object` and the intent schema is added to the system prompt, because
+  providers differ in schema support; the agent still checks every field. Code fences and `<think>` blocks are removed.
+- **Key handling:** read from the environment only, sent only in the Authorization header, removed from every error
+  text before it can reach the audit log.
+- **Budget:** a local limit (20 a minute, 800 a day by default, under Groq's free 30 and 1,000) raises `LLMError` before a
+  request is sent; the agent then reads rules-only, as when the model does not answer.
+- **Data sent:** unchanged from the local model (structured fields only; no invoice notes or memos; no pasted scam-check
+  text). All of it is fictional sandbox data.
+- **Evidence:** a run is named after what really ran (`..._qwen`), and `summary.json` records `llm` and `llm_provider`.
+  The hosted model (default `qwen/qwen3.8-27b`) is not the `qwen2.5:7b` of the earlier evidence runs; slides must say
+  which one produced a number.
+- **Tests:** `tests/test_hosted_llm.py` (9 tests) use a fake server on a local port. No real provider is called.
+
 ## 4. Security design (summary — full detail in SECURITY_SELF_ASSESSMENT.md)
 
 ### 4.1 Permission tiers
@@ -533,7 +554,7 @@ time-of-use gap.
 
 | Control | What it stops |
 |---|---|
-| Schema-constrained output (Ollama `format` JSON schema), intent enum | Malformed or free-form routing |
+| Schema-constrained output (Ollama `format` JSON schema, or JSON mode plus the schema in the prompt for a hosted model), intent enum | Malformed or free-form routing |
 | Grounding of LLM-extracted amounts and deadlines in the user's text | Invented amounts, e.g. the LLM says 99,999 when the user said 50,000 |
 | Dual agreement: money movement only if the rules reader **and** the LLM agree on the intent and on every field both read (payee, invoice id, amount); the LLM's payee must be named in the message. If they disagree, nothing is prepared and the student is asked: when the rules reader saw a money action, it shows its reading (built from stored data) for the student to confirm; otherwise it asks for a plain request. In rules-only mode the rules reader decides alone | One reader misreading a question as a transfer, or a transfer as a question. This happened in a real run: the LLM read "how much is 10000 BDT in CNY" as `convert_currency`. We rejected a second AI judging both (it can be misled the same way) and a weighted score from past accuracy (past accuracy says nothing about whether this message is an attack, and results would not be reproducible). |
 | Grounding guard on explanations: numbers, ISO dates, **percentages** (must be a percentage in the source), **currency labels** (an amount must carry the same currency as in the source), **number labels** (a number next to "balance", "limit", "left", "fee" or "cap" must sit next to the same word in the source), **status words** (e.g. "paid", "complete", "went through", "approved": only when the outcome says so; information answers never claim a payment, and claim an approval only if the data says "approved"), small numbers (0–10) pass only when no currency is attached, plus forbidden terms ("guaranteed", "risk-free", "credit score" for the readiness index) | Hallucinated or mislabelled figures and false status claims. The sentence is **cut in code** rather than re-prompted, because small models tend to repeat the same error. |
@@ -571,7 +592,7 @@ regression test too.
 
 | Check | Result |
 |---|---|
-| Unit tests (v0.4) | 245 / 245 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
+| Unit tests (v0.4) | 254 / 254 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
 | Scripted runs v0.4 | To be generated from the final code after the freeze (rules-only and with qwen2.5:7b); the counts go here and in `evidence/README.md` from each `summary.json` |
 | v0.2 runs (`evidence/run_20261015_*`, earlier version, 25 stories) | rules-only 25/25; with Qwen 25/25, guard cut 15 sentences, 2 residual entity-binding errors; first Qwen run 24/25 (fixed, now regression tests) |
 | v0.1 runs (archived in `evidence/archive_v0.1/`) | run A rules-only, run B guard v1, run C guard v2: real history of the earlier version, kept unedited |

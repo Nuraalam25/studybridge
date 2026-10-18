@@ -20,7 +20,7 @@ Shenzhen: her family in Dhaka funds her in BDT, while her tuition, rent and shop
 
 ## Design principle: AI suggests, code decides, the student confirms last
 
-- The local LLM (**Ollama `qwen2.5:7b`**, optional) only (1) reads the request into a strict form
+- The LLM (**Ollama `qwen2.5:7b`** locally, or a hosted Qwen such as Groq's; optional) only (1) reads the request into a strict form
   (intent, amount, currencies, payee, invoice id) and (2) writes up to three plain sentences.
 - For money actions, a rules reader must agree with the model on the intent and on every field both read
   (payee, invoice id, amount). If they disagree, nothing is prepared and the student is shown the rules
@@ -44,7 +44,7 @@ Requires Python 3.10+. There are **no third-party dependencies**; only the stand
 
 ```bash
 git clone https://github.com/MehazabinLamiha/StudyBridge.git && cd StudyBridge
-python -m unittest discover -s tests -t .                      # 245 tests
+python -m unittest discover -s tests -t .                      # 254 tests
 python -m studybridge --today 2026-10-13 --tier TRANSACT web    # http://127.0.0.1:8765
 python -m studybridge --today 2026-10-13 demo                   # the 31 stories -> evidence/
 python -m studybridge stories                                   # list the 31 stories
@@ -125,16 +125,39 @@ If Ollama is not reachable, StudyBridge logs a warning and runs rules-only. Ever
 In the web UI, the **Qwen** button in the top bar switches the model on and off without a restart; if
 Ollama is not running, switching on is refused and the app stays rules-only.
 
+### Optional: hosted Qwen (for a public demo such as Render)
+
+A server without Ollama can use a hosted OpenAI-style API instead. Groq has a free tier (read 16 Oct 2026: 30
+requests a minute, 1,000 a day, no card). Set the key as an environment variable, never in the repo or on the command line:
+
+```bash
+export GROQ_API_KEY=...                      # from console.groq.com
+python -m studybridge --llm --tier TRANSACT web          # Qwen starts on; the top-bar switch works too
+```
+
+- With only the key set, the client uses `https://api.groq.com/openai/v1` and the model in `config.HOSTED_LLM`
+  (`qwen/qwen3.8-27b`). Check the exact model id in your Groq console; if it is not listed, the switch is refused and
+  the screen says so. Use `--model` or `STUDYBRIDGE_LLM_MODEL` to change it, and `--llm-url` or
+  `STUDYBRIDGE_LLM_URL` for another provider (OpenRouter, Together, Ollama's `/v1`); the key is read from
+  `STUDYBRIDGE_LLM_KEY` or `GROQ_API_KEY`.
+- A local budget (`STUDYBRIDGE_LLM_PER_MINUTE`, default 20; `STUDYBRIDGE_LLM_PER_DAY`, default 800) stops calls before the
+  free quota does. When it is used up, or the service fails, the app runs rules-only for that message.
+- What leaves the server: the same fields Qwen already sees (never invoice notes or memos, never pasted scam-check
+  text). Everything is fictional sandbox data. The hosted model is a different Qwen from the evidence run's
+  `qwen2.5:7b`: say which one a screenshot came from.
+- On Render: set `GROQ_API_KEY` (and optionally `STUDYBRIDGE_LLM=1` to start with Qwen on) under Environment, and
+  redeploy. `PORT` is read automatically.
+
 ### Options
 
 | Flag | Meaning |
 |---|---|
 | `--tier PUBLIC\|READ\|ADVISE\|TRANSACT` | Permission tier granted to the session (default `ADVISE`, which cannot move money) |
-| `--llm` / `--model` | Use Ollama for intent parsing and explanations |
-| `--today YYYY-MM-DD` | Start the sandbox clock on this date (09:00) for reproducible runs |
+| `--llm` / `--model` / `--llm-url` | Use a model for intent parsing and explanations: Ollama, or a hosted API when a key or URL is set (`STUDYBRIDGE_LLM=1` is the same as `--llm`) |
+| `--today YYYY-MM-DD` | Start the sandbox clock on this date (09:00) for reproducible runs (the `STUDYBRIDGE_TODAY` variable does the same) |
 | `--profile path.json` | Use another sandbox profile |
 | `--audit path.jsonl` | Audit log location (default `var/audit.jsonl`) |
-| `web --port N --host H` | Web UI port (default 8765) and bind address (keep `127.0.0.1` outside a container) |
+| `web --port N --host H` | Web UI port (default 8765, or the `PORT` variable)  and bind address (keep `127.0.0.1` outside a container) |
 
 `python -m studybridge --audit <file> verify-audit` checks the hash chain. It exits 1 if a record was
 changed, and 2 if there is no log at that path.
@@ -193,7 +216,7 @@ studybridge/
   credit.py         credit-building readiness index
   budget.py         spending insights, runway, anomaly and memo scan
   wallet.py         sandbox multi-currency wallet (idempotent operations)
-  llm.py            Ollama client (stdlib urllib)
+  llm.py            model clients: Ollama and hosted OpenAI-style API, `make_client` (stdlib urllib)
   security/
     permissions.py  tiers, actor permissions, allowlist, limits
     guard.py        grounding guard, injection and pressure-wording detectors, de-obfuscation
@@ -205,7 +228,7 @@ studybridge/
   invoicelab.py     make a test bill, seeded random bills with the answer the plan requires
   web.py static/    local web UI (strict CSP, CSRF header, textContent rendering)
   demo.py           scripted run of the 31 stories that writes the evidence
-tests/              245 unit tests
+tests/              254 unit tests
 docs/               technical documentation, security self-assessment, problem research
 tools/              opinion_collect.py (run by hand on a team computer; not part of the app)
 evidence/           sandbox operation logs; v0.1 runs in evidence/archive_v0.1

@@ -16,8 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
-from .config import OLLAMA_URL
-from .llm import OllamaClient
+from .llm import make_client
 from .sandbox import Sandbox
 from .security.audit import AuditLog
 from .stories import GROUPS, STORIES
@@ -64,10 +63,11 @@ def _scams(sandbox) -> int:
 def run_demo(args, out_root: Path):
     llm = None
     if args.llm:
-        client = OllamaClient(base_url=os.environ.get("OLLAMA_URL", OLLAMA_URL), model=args.model)
+        client = make_client(args.llm_url, args.model)
         llm = client if client.available() else None
         if llm is None:
-            print(f"[warn] Ollama model '{args.model}' not reachable; running rules-only.", file=sys.stderr)
+            print(f"[warn] model '{client.model}' ({client.label}) not usable: {client.reason or 'not reachable'}; "
+                  "running rules-only.", file=sys.stderr)
     mode = "qwen" if llm else "rules"          # named after what really ran, not after the flag
     run_id = datetime.now().strftime(f"run_%Y%m%d_%H%M%S_{mode}")
     out = out_root / run_id
@@ -83,7 +83,7 @@ def run_demo(args, out_root: Path):
 
     md = [f"# StudyBridge sandbox run `{run_id}`", "",
           f"- version {__version__}; sandbox clock starts {start.isoformat(timespec='minutes')} for every story",
-          f"- LLM: {'Ollama ' + llm.model if llm else 'off (rules-only parser, template explanations)'}",
+          f"- LLM: {llm.label + ' ' + llm.model if llm else 'off (rules-only parser, template explanations)'}",
           "- 31 stories from plan v4; each starts from a fresh copy of `data/sample_profile.json`",
           "- All money movement is simulated; no real account is touched.", ""]
     results, codes = [], Counter()
@@ -246,7 +246,7 @@ def run_demo(args, out_root: Path):
 
     passed = sum(r["expected_outcomes_met"] for r in results)
     summary = {"run_id": run_id, "version": __version__, "clock_start": start.isoformat(),
-               "llm": llm.model if llm else None, "stories": len(results), "stories_as_expected": passed,
+               "llm": llm.model if llm else None, "llm_provider": llm.label if llm else None, "stories": len(results), "stories_as_expected": passed,
                "outcome_codes": dict(sorted(codes.items())), "executed": codes["EXECUTED"],
                "guard_sentences_cut": guard_cuts, "results": results,
                "info_requests": info, "info_requests_as_expected": sum(i["as_expected"] for i in info),

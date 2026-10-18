@@ -1,6 +1,6 @@
 # StudyBridge — Security Self-Assessment Report
 
-Version 0.4.0 (plan v4: three-gate safe payments) · scope: the sandbox build in this repository
+Version 0.5.0 (plan v4: three-gate safe payments) · scope: the sandbox build in this repository
 
 ## 1. Assets and threat model
 
@@ -97,13 +97,13 @@ How it is enforced:
 | Direct injection | `looks_like_injection()` blocks money movement for that message | `test_direct_injection_blocks_money_movement` |
 | Indirect injection (memo t16, invoice memos, the student's limit-raise note) | Free text is never parsed for intent and never sent to the LLM: the explanation prompt gets structured fields only (no memos, invoice purposes, notes or warnings). Memos are scanned and reported | `test_note_purpose_and_memos_never_reach_qwen` (records every prompt), `test_memo_injection_reported_not_followed` |
 | LLM offline or failing | Information requests fall back to rules-only; **money actions fail closed** with `MODEL_OUTPUT_INVALID` | `test_llm_offline_falls_back`, `test_fail_closed_for_money_only`, story D5 |
-| Qwen switch on the screen | Operator only (`set_llm`); switching on re-checks that Ollama answers and otherwise refuses with `LLM_UNAVAILABLE`, staying rules-only; every switch is audit-logged. Switching never changes a rule, limit or approval | `TestQwenSwitch` |
+| Qwen switch on the screen | Operator only (`set_llm`); switching on re-checks that the model answers (Ollama, or the hosted API with its key and model id) and otherwise refuses with `LLM_UNAVAILABLE`, staying rules-only; every switch is audit-logged. Switching never changes a rule, limit or approval | `TestQwenSwitch` |
 | Student cancels an allowance | Refused (`ACTOR_NOT_PERMITTED`); the student can only ask the family to cancel (`ask_cancel`, a flag the family sees), which changes nothing by itself | `TestAskFamilyToCancel`, `test_student_cannot_cancel_an_allowance` |
 | Invented or shortened invoice id | An LLM invoice id must equal a whole id written in the message, otherwise it is dropped (real case: Qwen shortened `RENT-2026-11B` to `RENT-2026-11`) | `test_invented_invoice_id_dropped`, `test_partial_invoice_id_rejected` |
 | False payment or approval claims in explanations | Status words (e.g. "paid", "complete", "went through", "successful", "approved", "gave approval") are cut unless the outcome says so; information answers never claim a payment, and claim an approval only if the data says "approved"; a small number (0–10) with a currency must be grounded like any other amount; `$` amounts are checked as USD (real cases: "is approved with an allowance of $3000" for a pending CNY request; "the allowance request is now processed" for a request only sent) | `test_guard_cuts_false_payment_claim`, `test_false_approval_and_dollar_label_cut`, `test_status_words_need_the_right_outcome`, `test_false_approval_on_status_is_cut` (real qwen2.5:7b sentence), `test_more_false_payment_claims_are_cut`, `test_small_number_with_a_currency_must_be_grounded` |
 | A real number under the wrong label | A number next to "balance", "limit", "left", "fee" or "cap" must sit next to the same word in the facts | `test_number_must_keep_its_label` |
 | Instructions hidden in an invoice | Invoice memos are data: flagged, never followed, never used to skip a gate | story D1 |
-| Data leaving the device | Local Ollama only; no cloud LLM calls | `llm.py` |
+| Data leaving the device | Local Ollama: nothing leaves. Hosted option (off unless a key or URL is set): only the structured fields Qwen already sees go to the provider; the key stays in the environment and is cut from error texts; a local budget caps calls | `llm.py`, `tests/test_hosted_llm.py` |
 
 ## 3a. OWASP Top 10 for LLM Applications (2025): where each item stands (v0.4)
 
@@ -115,7 +115,7 @@ covered; they are listed as such.
 |---|---|---|---|---|
 | LLM01 | Prompt injection | Covered, residual risk R2 | Wording patterns (with spacing, look-alike characters, leetspeak and base64 undone) are refused before Qwen is called. The real defence is structural: chat text never chooses a payee, account, actor, permission or approval, so an attack the patterns miss still meets every gate. Text inside a bill is data and is never sent to Qwen | Attacks group "Prompt injection" (10); `TestFreeTextAttacks`; stories D1, D2 |
 | LLM02 | Sensitive information disclosure | Covered for this data | Qwen is sent structured fields only; account numbers are masked everywhere; requests for passwords, keys, full account numbers, phone numbers or files are refused (`SECRET_REQUEST`). The sample data is fictional, so the data worth protecting in a real deployment is not here | Attacks group "Secrets" (5); `test_note_purpose_and_memos_never_reach_qwen` |
-| LLM03 | Supply chain | Partly | No third-party Python packages. The model (`qwen2.5:7b`) is pulled from the Ollama registry by name; it is not pinned by digest or verified by us | `llm.py`; no requirements file |
+| LLM03 | Supply chain | Partly | No third-party Python packages. The local model (`qwen2.5:7b`) is pulled from the Ollama registry by name, and a hosted model is named by id; neither is pinned by digest or verified by us, and a provider can change or retire a model | `llm.py`; no requirements file |
 | LLM04 | Data and model poisoning | Does not apply | Nothing is trained, fine-tuned or retrieved from user-supplied documents | — |
 | LLM05 | Improper output handling | Covered | Everything shown is set with `textContent`; strict CSP forbids inline script and style; Qwen's text passes the slot filler and guard and is never executed or used as a command. Markup in a message is shown as plain text | Attack "Script in the message" (test checks that it is answered as plain text). The CSP header and the `textContent`-only rule are not covered by an automated test; they were checked by reading `web.py` and `app.js` and by a browser run on 18 Oct with no console errors |
 | LLM06 | Excessive agency | Covered | Qwen has no tools. Tiers, actors and allowlists decide what any request can do; chat cannot approve, confirm, change a limit or a tier, and claims of authority are refused | Attacks group "Excessive agency" (4); the `ACTOR_NOT_PERMITTED` checks in `tests/test_payments.py` |
@@ -170,16 +170,17 @@ covered; they are listed as such.
 | R26 | A hosted demo has no login, so anyone with the link can press every screen (family approval, operator controls) | High if public | Host and Origin checks refuse other sites; only named host names are accepted (`STUDYBRIDGE_ALLOWED_HOSTS`, `RENDER_EXTERNAL_HOSTNAME`); everything is fictional sandbox data; share the link only for judging and shut the service down afterwards | Separate logins (see R1) |
 | R27 | The scam checker is keyword-based: a scam in other words, other languages or with spacing tricks can get "No warning signs found", and a genuine message can be flagged | Medium | The result never says "safe", always tells the student to check with the university, and decides nothing about money; the same message pasted into chat as a payment still meets every gate | A multilingual classifier; user testing with real student messages |
 | R28 | A payee the family saves is trusted once the 48 hours pass: a scammer who persuades the family to save an account and wait can still be paid | Medium | The family must tick that they checked the details themselves; the wait gives time to notice; the payee type decides what it can be paid for (tuition only to an institution); limits, approval and the student's confirmation still apply | Verified-account registry from the university (see R14) |
+| R29 | With the hosted model option, the provider sees the structured fields sent to Qwen, the key could leak through a misconfigured server, and an unauthenticated public page lets anyone switch Qwen on and spend the free quota | Medium | Only fictional sandbox data is sent (never invoice notes, memos or pasted scam-check text); the key is read from the environment, sent only in a header and removed from error texts; the local call budget stops calls before the free limit and the app falls back to rules-only; gates never depend on the model | Per-user logins (see R1); a provider agreement for real data; pinning a model version |
 
 ## 6. Test summary
 
-`python -m unittest discover -s tests -t .` runs 245 tests, all passing: 15 core tests, 27 security
+`python -m unittest discover -s tests -t .` runs 254 tests, all passing: 15 core tests, 27 security
 tests in `tests/test_security.py`, 148 payment tests in `tests/test_payments.py` (one of which
 plays all 31 stories and checks every expected outcome code; others send the 35 attacks, the free-text attacks
 and the random bills), 23 data tests in `tests/test_data.py` (the sample data is consistent, and every reason
 code is exercised by a test or story) 6 tests of the research collector in `tests/test_research_tool.py`
 (fake network, made-up posts) and 26 tests in `tests/test_extras.py` (scam checker and quiz, safe word, new-payee wait,
-hosted host names).
+hosted host names) and 9 tests in `tests/test_hosted_llm.py` (hosted model client, fake server).
 
 ## 7. Conclusion
 

@@ -247,8 +247,8 @@ class Sandbox:
         if on:
             client = self.llm_client
             if client is None or not getattr(client, "available", lambda: True)():
-                return a._blocked_action("set_llm", "LLM_UNAVAILABLE",
-                                         "No reachable Qwen model (is Ollama running with qwen2.5:7b?).")
+                why = getattr(client, "reason", "") or "is Ollama running with qwen2.5:7b?"
+                return a._blocked_action("set_llm", "LLM_UNAVAILABLE", f"No usable Qwen model ({why}).")
             self.llm = client
         else:
             self.llm = None

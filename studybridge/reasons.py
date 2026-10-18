@@ -100,8 +100,9 @@ REASONS = {
     "PAYEE_COOLING_OFF": ("A payee the family saved less than 48 hours ago cannot be paid yet. The wait gives the "
                           "family time to notice a mistake or a scam.",
                           "Wait until the time shown, and check the account with the payee in the meantime."),
-    "LLM_UNAVAILABLE": ("Qwen is not running on this computer, so it cannot be switched on.",
-                        "Start Ollama with the qwen2.5:7b model, then switch Qwen on again."),
+    "LLM_UNAVAILABLE": ("Qwen cannot be reached from this server, so it cannot be switched on.",
+                        "Start Ollama with the qwen2.5:7b model, or set the hosted-model key on the server, then "
+                        "switch Qwen on again."),
 }
 
 STATUS = {

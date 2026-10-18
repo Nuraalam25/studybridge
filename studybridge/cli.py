@@ -7,8 +7,7 @@ from pathlib import Path
 
 from . import DEFAULT_PROFILE, PROJECT_ROOT
 from .agent import StudentFinanceAgent
-from .config import OLLAMA_URL
-from .llm import OllamaClient
+from .llm import make_client
 from .security.audit import AuditLog
 from .security.permissions import Tier
 from .wallet import SandboxWallet
@@ -17,11 +16,12 @@ from .wallet import SandboxWallet
 def build_agent(args) -> StudentFinanceAgent:
     llm = None
     if args.llm:
-        client = OllamaClient(base_url=os.environ.get("OLLAMA_URL", OLLAMA_URL), model=args.model)
+        client = make_client(args.llm_url, args.model)
         if client.available():
             llm = client
         else:
-            print(f"[warn] Ollama model '{args.model}' not reachable; running rules-only.", file=sys.stderr)
+            print(f"[warn] model '{client.model}' ({client.label}) not usable: {client.reason or 'not reachable'}; "
+                  "running rules-only.", file=sys.stderr)
     today = date.fromisoformat(args.today) if args.today else None
     return StudentFinanceAgent(SandboxWallet.from_file(args.profile), AuditLog(args.audit),
                                granted_tier=Tier[args.tier], llm=llm, today=today)
@@ -68,9 +68,13 @@ def main(argv=None):
     ap.add_argument("--profile", default=str(DEFAULT_PROFILE))
     ap.add_argument("--audit", default=str(PROJECT_ROOT / "var" / "audit.jsonl"))
     ap.add_argument("--tier", default="ADVISE", choices=[t.name for t in Tier if t < Tier.ADMIN])
-    ap.add_argument("--llm", action="store_true", help="use local Ollama for parsing and explanations")
-    ap.add_argument("--model", default="qwen2.5:7b")
-    ap.add_argument("--today", help="override today's date (YYYY-MM-DD) for reproducible runs")
+    ap.add_argument("--llm", action="store_true", default=os.environ.get("STUDYBRIDGE_LLM") == "1",
+                    help="use a model for parsing and explanations: local Ollama, or a hosted OpenAI-style API "
+                         "when --llm-url or GROQ_API_KEY / STUDYBRIDGE_LLM_KEY is set")
+    ap.add_argument("--model", default=None, help="model name (default qwen2.5:7b on Ollama, the Groq Qwen when hosted)")
+    ap.add_argument("--llm-url", default=None, help="base URL of an OpenAI-style API, e.g. https://api.groq.com/openai/v1")
+    ap.add_argument("--today", default=os.environ.get("STUDYBRIDGE_TODAY") or None,
+                    help="override today's date (YYYY-MM-DD) for reproducible runs (or set STUDYBRIDGE_TODAY)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("chat")
     sub.add_parser("verify-audit")
@@ -80,7 +84,7 @@ def main(argv=None):
     web = sub.add_parser("web")
     web.add_argument("--state", default=os.environ.get("STUDYBRIDGE_STATE"),
                      help="save and restore approvals, balances and totals in this JSON file (optional)")
-    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
     web.add_argument("--host", default="127.0.0.1", help="keep 127.0.0.1 unless inside a container")
     args = ap.parse_args(argv)
 
@@ -100,8 +104,8 @@ def main(argv=None):
         from .web import serve
         probe = build_agent(args)
         start = datetime.fromisoformat(args.today + "T09:00") if args.today else None
-        # The Qwen switch on the screen turns this client on; it is only used if Ollama answers then.
-        client = probe.llm or OllamaClient(base_url=os.environ.get("OLLAMA_URL", OLLAMA_URL), model=args.model)
+        # The Qwen switch on the screen turns this client on; it is only used if the model answers then.
+        client = probe.llm or make_client(args.llm_url, args.model)
         sandbox = Sandbox(args.profile, probe.audit, llm=probe.llm, tier=Tier[args.tier], start=start,
                           ticking=True, llm_client=client, state_path=args.state)
         serve(sandbox, args.port, args.host)
