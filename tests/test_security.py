@@ -150,7 +150,7 @@ class TestLLMHardening(unittest.TestCase):
     def test_guard_cuts_invented_number(self):
         llm = FakeLLM({"intent": "fx_quote", "amount": 10000, "from_currency": "BDT", "to_currency": "CNY",
                        "deadline_days": None, "payee": None, "invoice_id": None},
-                      text="You would receive CNY 524.21. That is a 7.5% saving versus banks.")
+                      text="You would receive CNY {you_get}. That is a 7.5% saving versus banks.")
         r = make_agent(llm=llm).handle("how much is 10000 BDT in CNY")
         self.assertEqual(len(r.guard_removed), 1)
         self.assertIn("7.5%", r.guard_removed[0])
@@ -212,6 +212,24 @@ class TestAudit(unittest.TestCase):
         self.assertEqual(rec["data"]["account_number"], "****3445")
         self.assertNotIn("99887766554433", rec["data"]["note"])
         self.assertEqual(mask_account("12"), "****")
+
+
+class TestNumberPlaceholders(unittest.TestCase):
+    """Qwen writes {placeholders}; code fills them from the facts. Typed digits and unknown names are cut."""
+
+    def test_fill_and_cut(self):
+        from studybridge import slots
+        view = {"amount": "38.00", "invoice": "INV-0003", "account": "****3446",
+                "categories": [{"category": "rent", "bdt": "62563.94"}, {"category": "food", "bdt": "40145.20"}]}
+        numbers, verbatim = slots.collect(view)
+        self.assertEqual(numbers["categories_rent_bdt"], "62,563.94")       # list items are named by their label
+        pct, _ = slots.collect({"cost_pct": "1.25"})
+        self.assertEqual(slots.fill("It costs {cost_pct}% of it.", pct, set())[0], "It costs 1.25% of it.")
+        text, cut = slots.fill("You pay CNY {amount} for INV-0003. Rent is about 40,000 BDT. "
+                               "Food is {categories_food_bdt} BDT. Your {balance} is fine. Account ****3446 is wrong.",
+                               numbers, verbatim)
+        self.assertEqual(text, "You pay CNY 38.00 for INV-0003. Food is 40,145.20 BDT. Account ****3446 is wrong.")
+        self.assertEqual(cut, ["Rent is about 40,000 BDT.", "Your {balance} is fine."])
 
 
 if __name__ == "__main__":

@@ -178,7 +178,7 @@ class TestStoryNumbers(unittest.TestCase):
         # University "changed bank details" (from Nura's data): the invoice claims it; the saved account is unchanged.
         self.assertTrue(INV["INV-0009"]["claims_new_account"])
         self.assertNotIn(INV["INV-0009"]["account_number"], accounts)
-        self.assertTrue(looks_like_injection(INV["INV-0007"]["memo"]))
+        self.assertTrue(looks_like_injection(INV["INV-0008"]["memo"]))
         self.assertIn("personal wallet", INV["INV-0006"]["memo"])
         self.assertTrue(pressure_signals(INV["INV-0011"]["memo"]))
         self.assertTrue(any(looks_like_injection(t["memo"]) for t in PROFILE["transactions"]))

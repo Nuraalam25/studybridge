@@ -80,11 +80,9 @@ def main(argv=None):
     web = sub.add_parser("web")
     web.add_argument("--state", default=os.environ.get("STUDYBRIDGE_STATE"),
                      help="save and restore approvals, balances and totals in this JSON file (optional)")
-    web.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
+    web.add_argument("--port", type=int, default=8765)
     web.add_argument("--host", default="127.0.0.1", help="keep 127.0.0.1 unless inside a container")
     args = ap.parse_args(argv)
-    if not args.today:      # lets a hosted demo pin the sandbox date without a command-line flag
-        args.today = os.environ.get("STUDYBRIDGE_TODAY") or None
 
     if args.cmd == "chat":
         cmd_chat(args)

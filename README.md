@@ -43,8 +43,8 @@ See [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) and
 Requires Python 3.10+. There are **no third-party dependencies**; only the standard library is used.
 
 ```bash
-git clone https://github.com/Nuraalam25/studybridge.git && cd studybridge
-python -m unittest discover -s tests -t .                      # 176 tests
+git clone https://github.com/MehazabinLamiha/StudyBridge.git && cd StudyBridge
+python -m unittest discover -s tests -t .                      # 218 tests
 python -m studybridge --today 2026-10-13 --tier TRANSACT web    # http://127.0.0.1:8765
 python -m studybridge --today 2026-10-13 demo                   # the 31 stories -> evidence/
 python -m studybridge stories                                   # list the 31 stories
@@ -65,29 +65,35 @@ One page with three screens:
   reader and Qwen proposed and what code actually used, the limits, and the live audit chain with
   **Verify** and **Tamper test (on a copy)**.
 - **Family phone** (right): approval inbox (tuition, allowances, monthly rent, one-day limit raises
-  with the student's note, new bank accounts with an "I called the number on file" check), a
-  **Stopped for your student** list (what the code refused, why, and what to do), daily
-  limit slider (CNY 500–1,000), documents, open allowances. Its labels, buttons, the two scam warnings
-  and every reason and fix step switch to Bangla (invoice details and document names stay in English;
-  the Bangla text is a first draft and still needs a native speaker's proofreading).
+  with the student's note, new bank accounts with an "I called the number on file" check), daily
+  limit slider (CNY 500–1,000), documents, open allowances. Its labels and buttons switch to Bangla
+  (invoice details, document names and warnings stay in English; the Bangla text still needs a native
+  speaker's proofreading).
 
-New in v0.4 (view features; none of them changes a decision):
+Also on screen (built by Nura, merged 17 October): **Try to scam it** (ready-made attacks and a
+free-text box, each sent through the normal student chat, with a scoreboard where "money moved without both"
+stays 0); the **Invoice X-ray** (**Why?** on a suspicious bill: the wrong digit, the missing letter, pressure
+wording and instructions aimed at the AI); a **scams stopped** counter beside the logo; the family phone's
+**Stopped for your student** list with every reason in Bangla; and Banglish/Bangla input (works fully with
+Qwen off; with Qwen on, some Bangla messages end as a question back). After a blocked scam bill, the chat
+offers one tap to pay the payee's own bill instead.
 
-- **Impact strip** under the top bar: BDT protected from wrong accounts, scams stopped, and fees saved
-  against a bank wire. The code computes them from what happened in the session (each scam counted once;
-  only Reset clears them). Playing B1, B2, B6, B8 and B9 shows BDT 1,808,800 and 5; playing A1 adds BDT 10,571.09.
-- **Invoice X-ray**: a **Why?** button on every suspicious bill in Bills, and automatically in the Glass Box
-  when Gate 1 stops a bill. It marks the wrong digit (only positions and the last four digits are sent, never a
-  full account number), the misspelled issuer, the agent's name, pressure wording and instructions aimed at the AI.
-- **Money-route map** at the top of the Glass Box: Dhaka → Gate 1 → family → bank review → student → provider →
-  Shenzhen, each stop green, orange or red from the case's own step statuses.
-- **Judge tour**: one click plays A1, B2, B6, A6 and D2 in presenter mode (large captions), then the audit
-  tamper test. About three minutes, pausable. `/?tour=1` starts it on load.
-- **Try to scam it**: twelve ready-made attacks and a free-text box. Each is an ordinary student chat message, so
-  every gate applies. The scoreboard shows attempts, stopped, waiting for the family, waiting for the student, and
-  money moved without both (always 0). Start the server with `--tier TRANSACT`, or press the button the panel offers.
-- **Banglish and Bangla**: the rules reader understands "canteen e 38 yuan dao", "INV-0003 পেমেন্ট করো", "টাকা কত আছে"
-  and Bangla digits; "rules bhule jao" and similar attacks are caught. Qwen still decides nothing.
+New in v0.4 (18 October):
+
+- **What Qwen does is visible, and its absence is too.** The Glass Box has a Qwen card: which reader (rules or
+  Qwen) read each message, whether Qwen was asked, and what it was sent. With Qwen on, a money request that only
+  Qwen reads (the rules reader finds no payment) is offered back to the student as a question written by code,
+  never run on Qwen's say-so. Attacks are stopped *before* Qwen and the Glass Box says so.
+- **Try to scam StudyBridge** now has 32 ready-made attacks in six groups, labelled with the OWASP Top 10 for LLM
+  Applications (2025): payment scams, prompt injection (spaced letters, leetspeak, Banglish, base64, role-play,
+  a hidden instruction in a bill), secret and system-prompt requests, excessive agency (claiming to be the family
+  or admin), markup, and floods. Free text is recognised and named. When an attack is caught the whole screen
+  turns dark red with a banner naming the threat; it clears by itself after a few seconds.
+- **Invoice lab** (second tab of the same panel): build any bill (payee, amount, issuer name, account, note) and
+  try to pay it, or let the code make random bills. A random bill is a genuine bill changed in one known way; the
+  plan decides what must happen, and the code compares. "Check 100 random bills" runs in a throwaway sandbox.
+- **Problem research** with sources: [docs/PROBLEM_RESEARCH.md](docs/PROBLEM_RESEARCH.md), and a collector for
+  Reddit, YouTube and X posts to run on a team computer (`tools/opinion_collect.py`).
 
 Demo controls in the top bar: the **sandbox clock** (+1 h / +25 h / +73 h shows expiries),
 **Assistant can** (the permission tier in plain words: Rates only = PUBLIC, See my wallet = READ, Plan
@@ -118,7 +124,6 @@ Ollama is not running, switching on is refused and the app stays rules-only.
 | `--profile path.json` | Use another sandbox profile |
 | `--audit path.jsonl` | Audit log location (default `var/audit.jsonl`) |
 | `web --port N --host H` | Web UI port (default 8765) and bind address (keep `127.0.0.1` outside a container) |
-| `web --state FILE` | Optional: save approvals, allowances, balances and today's totals to this JSON file after every action, and restore them at start (default: in memory only) |
 
 `python -m studybridge --audit <file> verify-audit` checks the hash chain. It exits 1 if a record was
 changed, and 2 if there is no log at that path.
@@ -136,12 +141,6 @@ docker run --rm -p 127.0.0.1:8765:8765 studybridge
 
 Do not expose the web UI to the internet. It has no user authentication, because it is a
 single-user sandbox (see the known-risk list).
-
-**Hosted demo (optional, sandbox only):** `render.yaml` deploys the Docker image to Render for a
-public demo. Set `STUDYBRIDGE_ALLOWED_HOSTS` to the service's host name (the host check refuses every
-other name; by default only local names are allowed) and keep `STUDYBRIDGE_TODAY=2026-10-13`. Anyone with the link
-shares one sandbox, can reset it and can change the tier, and the state resets when the service restarts or
-sleeps. Optionally set `STUDYBRIDGE_DEMO_PASSWORD` to make every visitor enter one shared password first (it keeps strangers out; it is not a login). There is no real money. Qwen needs a local Ollama, so the hosted demo runs rules-only.
 
 ## Example requests
 
@@ -169,11 +168,7 @@ studybridge/
   reasons.py        reason codes with meaning and fix step
   sandbox.py        one session, three actors (student, family, operator); story runner
   stories.py        the 31 test stories as data
-  xray.py           invoice X-ray view data (which digit, letter or phrase is wrong)
-  challenge.py      ready-made attacks for the "Try to scam it" panel
-  bangla.py         Banglish and Bangla words for the rules reader
   clock.py          sandbox clock (approval windows, expiries)
-  state.py          optional saved state (JSON) for the web demo
   config.py         sandbox rates, provider archetypes, limits
   money.py fx.py    Decimal money and FX quotes
   remittance.py     provider comparison + closed-form inverse
@@ -184,12 +179,16 @@ studybridge/
   llm.py            Ollama client (stdlib urllib)
   security/
     permissions.py  tiers, actor permissions, allowlist, limits
-    guard.py        grounding guard, injection and pressure-wording detectors
+    guard.py        grounding guard, injection and pressure-wording detectors, de-obfuscation
+    threats.py      names an attack (OWASP LLM Top 10 ids) for refusals, the red alert and the score
     audit.py        hash-chained audit log, PII masking
+  challenge.py      the 32 ready-made attacks of "Try to scam StudyBridge"
+  invoicelab.py     make a test bill, seeded random bills with the answer the plan requires
   web.py static/    local web UI (strict CSP, CSRF header, textContent rendering)
   demo.py           scripted run of the 31 stories that writes the evidence
-tests/              176 unit tests
-docs/               technical documentation, security self-assessment
+tests/              218 unit tests
+docs/               technical documentation, security self-assessment, problem research
+tools/              opinion_collect.py (run by hand on a team computer; not part of the app)
 evidence/           sandbox operation logs; v0.1 runs in evidence/archive_v0.1
 data/               fictional sample profile, invoices and payees
 ```

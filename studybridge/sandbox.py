@@ -7,16 +7,15 @@ the model, and ACTOR_ACTIONS decides who may do what.
 """
 import copy
 import json
+import shutil
+from collections import Counter
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 
 from . import state as saved_state
 from .agent import AgentResponse, StudentFinanceAgent
 from .clock import SandboxClock
 from .llm import LLMError
-from .config import HOME_CURRENCY
-from .money import convert_mid, q
 from .security.audit import AuditLog
 from .security.permissions import Tier, actor_allowed
 from .stories import STORY_BY_ID, STORIES
@@ -52,7 +51,7 @@ FRAUD_CODES = ("PAYEE_NOT_VERIFIED", "ACCOUNT_CHANGED", "INJECTION_DETECTED")
 
 
 def new_impact() -> dict:
-    return {"protected_bdt": Decimal(0), "scams": [], "fees_saved_bdt": Decimal(0)}
+    return {"scams": []}
 
 
 class Sandbox:
@@ -70,6 +69,7 @@ class Sandbox:
         self.story_ctx = {}
         self.agent = None
         self.impact = new_impact()
+        self.qwen_roles = Counter()             # how Qwen took part in each chat message (for the demo summary only)
         self.state_path = Path(state_path) if state_path else None
         self.reset()
         self._restore_state()
@@ -111,25 +111,27 @@ class Sandbox:
     def act(self, actor: str, action: str, args: dict = None) -> AgentResponse:
         resp = self._act(actor, action, args)
         self._tally(action, args or {}, resp)
+        self._note_role(action, resp)
         self._save_state()
         return resp
 
+    def _note_role(self, action: str, resp: AgentResponse):
+        """Counts how the readers took part (off / agreed / added / changed / offered / confirmed / disagreed / failed)."""
+        case = self.agent.cases.get(resp.case_id) if action == "chat" and resp.case_id else None
+        role = ((case or {}).get("glass", {}).get("parse") or {}).get("role")
+        if role:
+            self.qwen_roles[role["reading"]] += 1
+
     def _tally(self, action: str, args: dict, resp: AgentResponse):
-        """Impact counter. Counts only what the code already decided; it never influences a decision.
+        """Scam counter. Counts only what the code already decided; it never influences a decision.
         Each scam is counted once (by invoice id, or by message text when no invoice is named)."""
-        i = self.impact
-        a = self.agent
-        case = a.cases.get(resp.case_id) if resp.case_id else None
-        if action == "chat" and resp.blocked and resp.code in FRAUD_CODES:
-            inv_id = case.get("invoice_id") if case else None
-            key = inv_id or "msg:" + " ".join(str(args.get("message", "")).lower().split())[:120]
-            if key not in i["scams"]:
-                i["scams"].append(key)
-                inv = a.book.invoices.get(inv_id) if inv_id else None
-                if inv is not None and not (resp.code == "INJECTION_DETECTED"):
-                    i["protected_bdt"] += q(convert_mid(inv["amount"], inv["currency"], HOME_CURRENCY))
-        if action == "confirm" and resp.code == "EXECUTED" and case and case.get("saving_bdt"):
-            i["fees_saved_bdt"] += Decimal(case["saving_bdt"])
+        if not (action == "chat" and resp.blocked and resp.code in FRAUD_CODES):
+            return
+        case = self.agent.cases.get(resp.case_id) if resp.case_id else None
+        inv_id = case.get("invoice_id") if case else None
+        key = inv_id or "msg:" + " ".join(str(args.get("message", "")).lower().split())[:120]
+        if key not in self.impact["scams"]:
+            self.impact["scams"].append(key)
 
     def _act(self, actor: str, action: str, args: dict = None) -> AgentResponse:
         args = args or {}
@@ -159,8 +161,18 @@ class Sandbox:
             return a.family_set_doc(str(args.get("doc", "")), bool(args.get("ready")), actor=actor)
         if action == "cancel_allowance":
             return a.cancel_allowance(str(args.get("id", "")), actor=actor)
+        if action == "ack_alert":
+            return a.ack_alert(str(args.get("id", "")), actor=actor)
         if action == "ask_cancel":
             return a.ask_cancel(str(args.get("id", "")), actor=actor)
+        if action == "check_random_bills":
+            if not actor_allowed(actor, action):
+                return a._actor_refused(actor, action)
+            return self._check_random_bills(args.get("n"), args.get("seed"))
+        if action in ("add_invoice", "generate_invoice"):
+            if not actor_allowed(actor, action):
+                return a._actor_refused(actor, action)
+            return a.add_lab_invoice(args) if action == "add_invoice" else a.generate_lab_invoice(args)
         if action in ("set_tier", "set_llm", "advance_clock", "reset"):
             if not actor_allowed(actor, action):
                 return a._actor_refused(actor, action)
@@ -188,6 +200,36 @@ class Sandbox:
             self.audit.append("tier_changed", {"tier": tier.name, "by": "operator (screen)"})
             return AgentResponse(f"Permission tier set to {tier.name}.", action)
         return a._blocked_action(action, "NOT_FOUND", f"Unknown action '{action}'.")
+
+    def _check_random_bills(self, n, seed0) -> AgentResponse:
+        """Random bills in a throwaway sandbox (its own audit file, deleted afterwards), so the live sandbox, its
+        history and its counters stay as they are."""
+        import tempfile
+        from . import invoicelab
+        n = n if isinstance(n, int) and not isinstance(n, bool) else 100
+        n = max(1, min(n, 200))
+        seed0 = seed0 if isinstance(seed0, int) and not isinstance(seed0, bool) else 0
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            sb = Sandbox(self.profile_path, AuditLog(tmp / "audit.jsonl"), tier=Tier.TRANSACT,
+                         start=self.agent.clock.now().replace(tzinfo=None), narrate=False)
+            results = []
+            for seed in range(seed0, seed0 + n):
+                sb.reset()
+                results.append(invoicelab.run_check(sb, seed))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        by = {}
+        for r in results:
+            row = by.setdefault(r["scenario"], {"title": r["title"], "bills": 0, "as_expected": 0})
+            row["bills"] += 1
+            row["as_expected"] += r["ok"]
+        good = sum(r["ok"] for r in results)
+        data = {"count": len(results), "as_expected": good, "by_scenario": by, "seed": seed0,
+                "examples": results[:6], "wrong": [r for r in results if not r["ok"]][:10]}
+        self.audit.append("random_bills_checked", {"count": len(results), "as_expected": good, "seed": seed0})
+        return AgentResponse(f"{good} of {len(results)} random bills got the answer the plan requires.",
+                             "check_random_bills", data=data)
 
     def _set_llm(self, on: bool) -> AgentResponse:
         """Operator switch between Qwen and rules-only mode. Fails closed if the model is not reachable."""
@@ -243,8 +285,5 @@ class Sandbox:
                  "setup": s.setup} for s in STORIES]
 
     def snapshot(self) -> dict:
-        i = self.impact
         return {**self.agent.snapshot(), "llm_switch": self.llm_client is not None,
-                "impact": {"protected_bdt": q(i["protected_bdt"]), "scams_stopped": len(i["scams"]),
-                           "fees_saved_bdt": q(i["fees_saved_bdt"]),
-                           "label": "sandbox session, computed by the code, not typed in"}}
+                "impact": {"scams_stopped": len(self.impact["scams"])}}

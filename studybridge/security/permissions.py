@@ -50,11 +50,15 @@ ACTOR_ACTIONS = {
     "set_doc": {"family"},
     "cancel_allowance": {"family"},          # the student has no cancel button (plan §5.2)
     "ask_cancel": {"student"},               # ...but can ask the family to cancel
+    "ack_alert": {"family"},                 # the family marks a stopped payment as seen
     # Sandbox operator controls (the person running the demo, from the screen).
     "set_tier": {"operator"},
     "set_llm": {"operator"},
     "advance_clock": {"operator"},
     "reset": {"operator"},
+    "add_invoice": {"operator"},             # Invoice lab: a bill typed in on the screen (never from chat)
+    "generate_invoice": {"operator"},        # Invoice lab: a bill made at random by the code
+    "check_random_bills": {"operator"},      # Invoice lab: many random bills in a throwaway sandbox
 }
 
 

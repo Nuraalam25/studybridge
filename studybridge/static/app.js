@@ -133,6 +133,7 @@ async function act(actor, action, args = {}) {
 
 function onResponse(actor, action, args, r) {
   if (r.case_id) { selectedCase = r.case_id; followLatest = true; }
+  if (r.threat) threatAlert(r.threat, r);
   if (actor === "student" && action === "chat") addBot(r);
   else if (actor === "student") addBot(r, true);
   else if (actor === "family") {
@@ -173,9 +174,16 @@ function actionButton(label, fn) {
   wrap.append(btn);
   return wrap;
 }
+// After a block, the one-tap next step the code found in stored data (never a new account).
+const SAFE_LABEL = {
+  PAYEE_NOT_VERIFIED: (id) => `Pay the payee's own bill instead (${id})`,
+  PAYEE_NOT_MATCHING_INVOICE: (id) => `Pay ${id} exactly as stored`,
+  AMOUNT_NOT_MATCHING_INVOICE: (id) => `Pay ${id} exactly as stored`,
+};
 function addBot(r, compact) {
   const b = el("div", undefined, "bubble bot");
   b.append(el("span", human(r.code), "code " + codeClass(r)));
+  if (r.threat) b.append(threatChip(r.threat));
   const [main, plain] = r.text.split("\n\nIn plain words: ");
   const lines = main.split("\n").filter((l) => !/^To execute in the sandbox/.test(l));
   const warns = [];
@@ -192,7 +200,11 @@ function addBot(r, compact) {
     addUser(r.reading.message);
     return act("student", "chat", { message: r.reading.message, reading_confirmed: true });
   }));
-  else if (r.suggestion) b.append(suggestButton(r.suggestion));
+  else if (r.suggestion && SAFE_LABEL[r.code]) {
+    const id = r.suggestion.split(" ").pop();
+    b.append(actionButton(SAFE_LABEL[r.code](id), () => sendChat(r.suggestion)));
+  } else if (r.suggestion) b.append(suggestButton(r.suggestion));
+  if (["INVOICE_REQUIRED", "INVOICE_NOT_FOUND"].includes(r.code)) b.append(actionButton("Open Bills", () => showStudentTab("bills")));
   if (r.code === "DAILY_LIMIT_REACHED") b.append(actionButton("Ask the family to raise my limit", openRaise));
   if (r.code === "TIER_TOO_LOW" && r.data && r.data.needs_tier) {
     b.append(actionButton(`Allow “${tierName(r.data.needs_tier)}”`, () => act("operator", "set_tier", { tier: r.data.needs_tier })));
@@ -296,8 +308,8 @@ function activityRow(title, sub, amount, dir) {
 }
 
 const BILL_GROUPS = [["University", ["tuition", "fee"], "pay invoice"], ["Rent", ["bill"], "pay rent bill"], ["Shop quotes", ["quote"], "pay quote"]];
-function renderBills() {
-  const box = $("bills");
+function renderBills(boxId = "bills", withPay = true) {
+  const box = $(boxId);
   box.replaceChildren();
   for (const [title, kinds, verb] of BILL_GROUPS) {
     const bills = state.book.invoices.filter((i) => kinds.includes(i.kind)).sort((a, z) => (a.status === "paid") - (z.status === "paid"));
@@ -312,19 +324,19 @@ function renderBills() {
       if (!i.account_ok && i.status !== "paid") left.append(el("div", "The account on this bill is not the one saved for this payee", "bill-warn"));
       const right = el("div", undefined, "bill-right");
       right.append(el("strong", `${i.currency} ${num(i.amount)}`));
-      if (i.status === "paid") right.append(el("span", "Paid", "small muted"));
-      else {
-        if (i.xray && i.xray.suspicious) {
-          const why = el("button", "Why?", "btn small danger");
-          why.type = "button";
-          why.onclick = () => openXray(i);
-          right.append(why);
-        }
+      const actions = el("div", undefined, "row");
+      const view = el("button", t("view"), "btn small" + (i.xray && i.xray.suspicious && i.status !== "paid" ? " danger" : ""));
+      view.type = "button";
+      view.onclick = () => openInvoice(i);
+      actions.append(view);
+      if (i.status === "paid") actions.append(el("span", "Paid", "small muted"));
+      else if (withPay) {
         const pay = el("button", "Pay", "btn small primary");
         pay.type = "button";
         pay.onclick = () => sendChat(`${verb} ${i.id}`);
-        right.append(pay);
+        actions.append(pay);
       }
+      right.append(actions);
       row.append(left, right);
       group.append(row);
     }
@@ -332,6 +344,57 @@ function renderBills() {
   }
 }
 
+// ------------------------------------------------------------------ invoice viewer
+// The bill as printed (issuer, bill-to, lines, bank), with the X-ray's marks on it, and the stories that use it.
+function invoiceDoc(inv) {
+  const d = inv.doc, x = inv.xray;
+  const doc = el("div", undefined, "invoice");
+  const top = el("div", undefined, "inv-top");
+  const who = el("div");
+  who.append(x.issuer.length ? marked(x.issuer, "inv-issuer") : el("div", d.issuer, "inv-issuer"), el("div", d.address || "", "small muted"));
+  const meta = el("div", undefined, "inv-meta");
+  meta.append(el("div", inv.kind === "quote" ? "Quote" : "Invoice", "inv-kind"), el("div", `No. ${inv.id}`),
+    el("div", `Issued ${d.issued || "—"}${inv.due ? " · due " + inv.due : ""}`, "small muted"));
+  top.append(who, meta);
+  const to = el("div", undefined, "inv-block");
+  to.append(el("div", "Bill to", "small muted"), el("div", `${d.bill_to} · Student ID ${d.student_id}`), el("div", d.school || "", "small muted"));
+  const table = el("table", undefined, "inv-lines");
+  for (const l of d.lines) {
+    const tr = el("tr");
+    tr.append(el("td", l.item), el("td", `${inv.currency} ${num(l.amount)}`));
+    table.append(tr);
+  }
+  const total = el("tr", undefined, "inv-total");
+  total.append(el("td", "Total"), el("td", `${inv.currency} ${num(inv.amount)}`));
+  table.append(total);
+  const pay = el("div", undefined, "inv-block");
+  pay.append(el("div", "Pay to", "small muted"), el("div", d.bank_name || "—"));
+  if (x.account.kind !== "none") pay.append(digitRow(x.account.length, x.account.last4, new Set(x.account.positions), "bad"));
+  doc.append(top, to, table, pay);
+  if (x.memo.some((g) => g.t.trim())) {
+    const memo = el("div", undefined, "inv-block");
+    memo.append(el("div", "Note printed on the bill", "small muted"), marked(x.memo, "xr-val"));
+    doc.append(memo);
+  }
+  doc.append(el("div", inv.status === "paid" ? "Paid" : "Open", "inv-stamp" + (inv.status === "paid" ? " paid" : "")));
+  return doc;
+}
+
+function storiesUsing(id) {
+  const re = new RegExp(`\\b${id}\\b`, "i");
+  return stories.filter((s) => s.steps.some((st) => re.test((st.args && st.args.message) || "")));
+}
+
+function openInvoice(inv) {
+  $("xray-title").textContent = `${inv.kind === "quote" ? "Quote" : "Invoice"} ${inv.id}`;
+  const body = [invoiceDoc(inv)];
+  if (inv.xray.suspicious) body.push(el("h3", "What is wrong with this bill", "inv-h"), xrayCard(inv));
+  else body.push(el("p", "This bill matches the saved payee and its saved account.", "xr-ok"));
+  const used = storiesUsing(inv.id);
+  if (used.length) body.push(el("p", "Used in stories: " + used.map((s) => `${s.id} ${s.title}`).join(" · "), "small muted"));
+  $("xray-body").replaceChildren(...body);
+  $("xray").showModal();
+}
 
 // ------------------------------------------------------------------ invoice X-ray (F1)
 // Draws what the code already found (server-side view data). Full account numbers never reach the browser:
@@ -339,7 +402,11 @@ function renderBills() {
 function marked(segs, cls) {
   const box = el("span", undefined, cls || "xr-text");
   for (const g of segs) {
-    if (g.m === "missing") box.append(el("span", g.t, "mk mk-missing"));
+    if (g.m === "missing") {                     // the bill lacks this letter: show the gap, not the letter
+      const gap = el("span", "", "mk-gap");
+      gap.title = `Missing letter “${g.t}”`;
+      box.append(gap);
+    }
     else if (g.m) box.append(el("span", g.t, `mk mk-${g.m}`));
     else box.append(document.createTextNode(g.t));
   }
@@ -369,8 +436,12 @@ function xrayCard(inv) {
   }
   if (x.issuer.length) {
     const r = el("div", undefined, "xr-row");
-    r.append(el("div", "Issuer on the bill", "xr-lbl"), marked(x.issuer, "xr-val"),
+    r.append(el("div", "Issuer on the bill, exactly as written", "xr-lbl"), marked(x.issuer, "xr-val"),
       el("div", `Saved payee: ${x.saved_name}`, "xr-sub"));
+    const missing = x.issuer.filter((g) => g.m === "missing").map((g) => `“${g.t}”`);
+    const typos = x.issuer.filter((g) => g.m === "typo").map((g) => `“${g.t}”`);
+    if (missing.length) r.append(el("div", `The bill leaves out ${missing.join(", ")}, so it is not the saved name.`, "xr-note"));
+    if (typos.length) r.append(el("div", `The letters ${typos.join(", ")} differ from the saved name.`, "xr-note"));
     card.append(r);
   }
   const a = x.account;
@@ -394,7 +465,7 @@ function xrayCard(inv) {
     card.append(r);
   }
   if (x.payee_type === "person_or_agent") {
-    card.append(el("div", "This payee is saved as an agent or consultancy. Tuition and seat fees never go to an agent.", "xr-note"));
+    card.append(el("div", "This payee is saved as an agent or consultancy. Tuition goes only to the university, or to a payment company the university names in its admission letter.", "xr-note"));
   }
   if (x.memo.some((g) => g.m)) {
     const r = el("div", undefined, "xr-row");
@@ -410,10 +481,6 @@ function xrayCard(inv) {
   return card;
 }
 
-function openXray(inv) {
-  $("xray-body").replaceChildren(xrayCard(inv));
-  $("xray").showModal();
-}
 
 // In the Glass Box the X-ray opens by itself when Gate 1 stopped a bill on an account, name or wording check.
 const XRAY_CODES = ["PAYEE_NOT_VERIFIED", "ACCOUNT_CHANGED", "ACCOUNT_ON_HOLD"];
@@ -441,8 +508,9 @@ function renderMap(c) {
   const f = c.funding;
   const pay = c.payment;
   const inv = c.invoice_id ? state.book.invoices.find((i) => i.id === c.invoice_id) : null;
-  const dest = (pay && pay.payee_name) || (inv && inv.payee) || (tuition ? "University" : "Shop or food");
-  const gateCode = st("4") === "fail" ? human(c.outcome) : "";
+  const dest = ((pay && pay.payee_name) || (inv && inv.payee) || (tuition ? "University" : "Shop or food"))
+    .replace(/\s*\(.*?\)/g, "");                          // "Sample University (tuition office)" -> "Sample University"
+  const gateCode = st("4") === "fail" ? "stopped here" : "";
   const nodes = [
     ["wallet", "Family wallet", "Dhaka", "pass"],
     ["gate", "Safety checks", gateCode || "Gate 1", st("4")],
@@ -468,7 +536,7 @@ function renderMap(c) {
 }
 
 // ------------------------------------------------------------------ impact counter (F2)
-const shownImpact = { protected: 0, scams: 0, fees: 0 };
+const shownImpact = { scams: 0 };
 function countTo(node, key, target, fmt) {
   const from = shownImpact[key];
   if (from === target) { node.textContent = fmt(target); return; }
@@ -488,16 +556,17 @@ function countTo(node, key, target, fmt) {
 }
 
 function renderImpact() {
-  const i = state.impact;
-  if (!i) return;
-  countTo($("imp-protected"), "protected", Number(i.protected_bdt), (v) => `BDT ${num(v, 0)}`);
-  countTo($("imp-scams"), "scams", Number(i.scams_stopped), (v) => String(Math.round(v)));
-  countTo($("imp-fees"), "fees", Number(i.fees_saved_bdt), (v) => `BDT ${num(v, 2)}`);
+  if (state.impact) countTo($("imp-scams"), "scams", Number(state.impact.scams_stopped), (v) => String(Math.round(v)));
+}
+
+function showFamTab(name) {
+  document.querySelectorAll(".fpane").forEach((p) => p.classList.toggle("on", p.dataset.fpane === name));
+  document.querySelectorAll(".fam-tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.ftab === name));
 }
 
 function showStudentTab(name) {
   document.querySelectorAll(".spane").forEach((p) => p.classList.toggle("on", p.dataset.spane === name));
-  document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.stab === name));
+  document.querySelectorAll("#pane-student .tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.stab === name));
   $("form").hidden = name !== "assistant";
   if (name === "assistant") scrollThread();
 }
@@ -609,6 +678,7 @@ function renderFamily() {
   if (!pending.length) inbox.append(el("div", t("empty"), "empty"));
   for (const r of pending.slice().reverse()) inbox.append(requestCard(r));
   renderAlerts();
+  renderBills("fam-bills", false);
 
   const base = Number(b.family_limit), lim = Number(b.family_limit_today);
   if (document.activeElement !== $("limit")) $("limit").value = base;
@@ -659,10 +729,11 @@ function reasonText(code, c) {
 function renderAlerts() {
   const ul = $("alerts");
   ul.replaceChildren();
-  const hits = (state.cases || []).filter((c) => c.kind === "payment" && c.outcome && outcome(c.outcome)[1] === "fail"
-    && c.outcome !== "REJECTED_BY_FAMILY").slice(-5).reverse();
-  if (!hits.length) { ul.append(el("li", t("alertsNone"), "muted")); return; }
-  for (const c of hits) {
+  const all = (state.cases || []).filter((c) => c.kind === "payment" && c.outcome && outcome(c.outcome)[1] === "fail"
+    && c.outcome !== "REJECTED_BY_FAMILY").reverse();
+  const fresh = all.filter((c) => !c.family_seen), seen = all.filter((c) => c.family_seen);
+  if (!fresh.length) ul.append(el("li", t("alertsNone"), "muted"));
+  for (const c of fresh) {
     const inv = c.invoice_id && state.book.invoices.find((i) => i.id === c.invoice_id);
     const li = el("li", undefined, "alert");
     const head = el("div", undefined, "a-head");
@@ -675,8 +746,23 @@ function renderAlerts() {
       fix.append(el("b", t("todo") + ": "), document.createTextNode(r.fix));
       li.append(fix);
     }
+    const row = el("div", undefined, "row");
+    if (inv) {
+      const v = el("button", t("viewInvoice"), "btn small");
+      v.type = "button";
+      v.onclick = () => openInvoice(inv);
+      row.append(v);
+    }
+    const ok = el("button", t("gotIt"), "btn small");
+    ok.type = "button";
+    ok.onclick = () => act("family", "ack_alert", { id: c.id });
+    row.append(ok);
+    li.append(row);
     ul.append(li);
   }
+  $("alerts-seen-box").hidden = !seen.length;
+  $("alerts-seen-count").textContent = seen.length ? `(${seen.length})` : "";
+  $("alerts-seen").replaceChildren(...seen.map((c) => el("li", `${c.id} · ${c.invoice_id || c.title} · ${human(c.outcome)}`)));
 }
 
 // The two warnings the code writes in English, shown in Bangla when the family phone is in Bangla.
@@ -719,6 +805,13 @@ function requestCard(r) {
   }
   if (r.kind === "allowance") card.append(el("div", r.monthly ? t("monthlyNote") : t("single"), "line small muted"));
   for (const w of r.warnings || []) card.append(el("div", `⚠ ${t("warn")}: ${warningText(w)}`, "warn"));
+  const inv = r.invoice_id && state.book.invoices.find((i) => i.id === r.invoice_id);
+  if (inv) {
+    const v = el("button", t("viewInvoice"), "btn small");
+    v.type = "button";
+    v.onclick = () => openInvoice(inv);
+    card.append(v);
+  }
   card.append(el("div", `${t("expires")} ${dur(r.seconds_left)}`, "exp"));
   const row = el("div", undefined, "row");
   const extra = {};
@@ -821,6 +914,7 @@ function renderGlass() {
   if (c) sel.value = c.id;
   renderRouteHead(c);
   renderMap(c);
+  renderCaseThreat(c);
   renderCaseXray(c);
   renderPipeline(c);
   renderChecks(c);
@@ -883,6 +977,7 @@ function routeOf(steps) {
   return { tuition: taken("6a"), everyday: ["6b", "7b", "8b"].some(taken) };
 }
 
+let showAllSteps = false;
 function renderPipeline(c) {
   const box = $("pipeline");
   box.replaceChildren();
@@ -891,7 +986,14 @@ function renderPipeline(c) {
   const { tuition, everyday } = routeOf(steps);
   // Show only the branch this request took; before a route is chosen, show both.
   const branch = tuition ? ["6a"] : everyday ? ["6b", "7b", "8b"] : ["6a", "6b", "7b", "8b"];
-  ["1", "2", "3", "4", "5", ...branch, "9", "10", "11"].forEach((k) => box.append(stop(meta[k], steps[k], c ? c.id : "")));
+  const keys = ["1", "2", "3", "4", "5", ...branch, "9", "10", "11"];
+  // A payment shows only the stop that stopped or waits, unless the viewer asks for every step.
+  const collapse = c && c.kind === "payment" && !showAllSteps;
+  const shown = collapse ? keys.filter((k) => steps[k] && ["fail", "wait"].includes(steps[k].status)) : keys;
+  shown.forEach((k) => box.append(stop(meta[k], steps[k], c ? c.id : "")));
+  const tg = $("steps-toggle");
+  tg.hidden = !(c && c.kind === "payment");
+  tg.textContent = showAllSteps ? "Show only the important step" : `Show all ${keys.length} steps`;
   if (c && c.notes && c.notes.length) {
     const notes = el("div", undefined, "notes");
     c.notes.forEach((n) => notes.append(el("div", n)));
@@ -932,37 +1034,90 @@ function brief(obj) {
   return SHOW.filter((k) => k in obj).map((k) => `${k}: ${obj[k] === null ? "null" : obj[k]}`).join("\n");
 }
 
+// "What Qwen did here": one plain summary, so Qwen on and Qwen off never look the same by accident.
+const ROLE_LABEL = {
+  off: ["Qwen is off", "role-off"], agreed: ["Qwen agreed", "role-ok"], added: ["Qwen added a detail", "role-ok"],
+  changed: ["Qwen read it differently", "role-note"], offered: ["Qwen read what the rules could not", "role-note"],
+  confirmed: ["Qwen's reading, confirmed by the student", "role-note"],
+  disagreed: ["Qwen disagreed, student asked", "role-warn"], failed: ["Qwen failed, rules took over", "role-warn"],
+};
+function renderQwenRole(box, c, g) {
+  const role = g.role || { reading: g.qwen ? "agreed" : "off", note: "" };
+  const [label, cls] = ROLE_LABEL[role.reading] || ROLE_LABEL.off;
+  const wrap = el("div", undefined, "qrole " + cls);
+  wrap.append(el("div", "What Qwen did in this request", "qrole-title"));
+  const row = (k, v) => {
+    const r = el("div", undefined, "qrole-row");
+    r.append(el("span", k, "qrole-k"), el("span", v));
+    wrap.append(r);
+  };
+  row("Reading", `${label}. ${role.note || ""}`.trim());
+  const ex = c.glass && c.glass.explain;
+  if (role.reading === "off") {
+    row("Explanation", "None. The answer is the plain facts that code wrote.");
+    row("Decision", "Made by code in both modes. With Qwen on it can read looser wording and add a plain-words summary; it cannot change a number, a gate or an approval.");
+  } else if (ex) {
+    const kept = (ex.kept || "").split(/(?<=[.!?])\s+/).filter(Boolean).length;
+    row("Explanation", `Qwen wrote a draft; ${kept} sentence(s) shown, ${(ex.cut || []).length} cut by code.`);
+    row("Decision", "Made by code. Qwen did not choose an amount, a payee, a gate result or an approval.");
+  } else {
+    row("Explanation", "None for this message: the answer was a fixed message that code wrote.");
+    row("Decision", "Made by code. Qwen did not choose an amount, a payee, a gate result or an approval.");
+  }
+  box.append(wrap);
+}
+
+const READ_FIELDS = [["intent", "What they want"], ["invoice_id", "Bill"], ["amount", "Amount"], ["from_currency", "From"],
+  ["to_currency", "To"], ["payee", "Payee"], ["deadline_days", "Deadline (days)"]];
 function renderAI(c) {
   const box = $("ai");
   box.replaceChildren();
   const g = c && c.glass && c.glass.parse;
   if (!g) { box.append(el("p", "No request yet.", "muted")); return; }
-  const blk = (cls, label, text) => {
-    const d = el("div", undefined, "blk " + cls);
+  const qwen = g.qwen && g.qwen.raw && typeof g.qwen.raw === "object" ? g.qwen.raw : null;
+  const show = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
+  renderQwenRole(box, c, g);
+  box.append(el("h4", "How the message was read"));
+  const table = el("table", undefined, "readers");
+  const head = el("tr");
+  ["", "Rules reader (code)", "Qwen", "Used"].forEach((h) => head.append(el("th", h)));
+  table.append(head);
+  for (const [k, label] of READ_FIELDS) {
+    const vals = [g.rules && g.rules[k], qwen && qwen[k], g.final && g.final[k]];
+    if (vals.every((v) => v === null || v === undefined || v === "")) continue;
+    const tr = el("tr");
+    tr.append(el("td", label), el("td", show(vals[0])), el("td", g.qwen ? show(vals[1]) : "off"), el("td", show(vals[2])));
+    table.append(tr);
+  }
+  box.append(table);
+  const used = g.final || {};
+  box.append(el("p", used.invoice_id
+    ? `The amount, payee and account come from the stored bill ${used.invoice_id}, not from the message or from Qwen.`
+    : used.amount ? "The amount comes from the message: the rules reader had to find it, and Qwen had to agree."
+      : "Nothing with money in it was read from this message.", "small muted"));
+  if (g.qwen && typeof g.qwen.raw === "string") box.append(el("p", g.qwen.raw, "small drop"));
+  if (g.qwen && g.qwen.dropped && g.qwen.dropped.length) box.append(el("p", "Dropped by code (not in the message): " + g.qwen.dropped.join(", "), "small drop"));
+  if (!g.qwen) {
+    box.append(el("p", "Qwen is off, so nothing was sent to it. The answer is written by code only.", "small muted"));
+    return;
+  }
+  const blk = (label, text) => {
+    const d = el("div", undefined, "blk q");
     d.append(el("div", label, "lbl"), el("pre", text));
     box.append(d);
     return d;
   };
-  blk("r", "Rules reader (code)", brief(g.rules));
-  if (!g.qwen) {
-    blk("q", "Qwen", "Off: rules-only mode. Switch Qwen on in the top bar to see the model's proposal here.");
-  } else {
-    blk("q", "Qwen proposed (raw)", typeof g.qwen.raw === "string" ? g.qwen.raw : brief(g.qwen.raw));
-    if (g.qwen.dropped && g.qwen.dropped.length) {
-      const d = blk("q", "Dropped by code (not in the message)", "");
-      d.querySelector("pre").replaceChildren(...g.qwen.dropped.map((x) => el("div", "✕ " + x, "drop")));
-    }
-  }
-  if (g.final) blk("f", "What code used", brief(g.final));
+  blk("Sent to Qwen to read the request (plus its fixed instructions)", g.qwen.user || "");
   const ex = c.glass.explain;
   if (ex) {
-    const d = blk("q", "Qwen's explanation (guard cuts struck through)", "");
+    blk("Sent to Qwen to explain the result", ex.sent);
+    blk("What Qwen wrote", ex.draft);
+    const d = blk("What was shown (cut sentences struck through)", "");
     const pre = d.querySelector("pre");
     pre.replaceChildren();
     if (ex.kept) pre.append(el("span", ex.kept + " "));
-    (ex.cut || []).forEach((s) => pre.append(el("del", s + " ")));
+    (ex.cut || []).forEach((x) => pre.append(el("del", x + " ")));
   }
-  box.append(el("div", "Qwen sees the request and results so it can explain them. It never owns a number, a permission or an approval.", "small muted"));
 }
 
 function meter(title, used, limit, cls, value, src) {
@@ -1101,19 +1256,77 @@ async function runStories(ids, opts = {}) {
 
 
 
-// ------------------------------------------------------------------ scam challenge (F5)
+// ------------------------------------------------------------------ red alert (a scam is being tried)
+// The whole screen turns dark red while an attack is on screen. It only reflects what the code already decided
+// (the response's `threat` field); it never decides anything.
+function clearAlert() {
+  document.body.classList.remove("redalert");
+  const b = $("redbanner");
+  if (b.matches(":popover-open")) b.hidePopover();
+}
+function threatAlert(th, r) {
+  if (!th) return;
+  if (th.level !== "danger") { toast(`${th.label}: ${th.what}`); return; }
+  document.body.classList.add("redalert");
+  $("rb-title").textContent = `Threat stopped: ${th.label}`;
+  $("rb-sub").textContent = (th.owasp ? `OWASP ${th.owasp} · ${th.owasp_name}. ` : "") +
+    (r.blocked ? "Nothing moved." : "Nothing in it was followed.");
+  const b = $("redbanner");
+  if (!b.matches(":popover-open")) b.showPopover();
+  clearTimeout(threatAlert._t);
+  threatAlert._t = setTimeout(clearAlert, 6500);
+}
+function threatChip(th) {
+  const c = el("div", undefined, `threat threat-${th.level}`);
+  const head = el("div", undefined, "threat-head");
+  head.append(el("strong", th.label));
+  if (th.owasp) head.append(el("span", `OWASP ${th.owasp}`, "owasp"));
+  c.append(head);
+  if (th.what) c.append(el("div", th.what, "small"));
+  return c;
+}
+
+// In the Glass Box: what the attacker tried, and what stopped it.
+function renderCaseThreat(c) {
+  const box = $("case-threat");
+  box.replaceChildren();
+  if (!c || !c.threat || c.threat.level !== "danger") return;
+  const th = c.threat;
+  const card = el("div", undefined, "threat-card");
+  card.append(el("div", th.owasp ? `${th.label} · OWASP ${th.owasp} ${th.owasp_name}` : th.label, "tc-title"));
+  const role = c.glass && c.glass.parse && c.glass.parse.role;
+  const lines = [];
+  if (th.what) lines.push(["What happened", th.what]);
+  else lines.push(["What happened", "No wording gave this away: the stored data did. The bill asks for an account the family never saved."]);
+  if (role && role.reading === "skipped") lines.push(["What the AI saw", "Nothing. Qwen was never sent this message."]);
+  lines.push(["What stopped it", c.outcome ? human(c.outcome).toLowerCase() + ", decided by code" : "code"]);
+  for (const [k, v] of lines) {
+    const r = el("div", undefined, "tc-row");
+    r.append(el("span", k, "tc-k"), el("span", v));
+    card.append(r);
+  }
+  box.append(card);
+}
+
+// ------------------------------------------------------------------ scam challenge
 // Every attack is a normal student chat message sent through act(): no special route, nothing bypassed.
-const score = { attempts: 0, stopped: 0, waiting: 0, ready: 0, moved: 0 };
-const FAMILY_WAIT = ["AWAITING_FAMILY", "ALLOWANCE_REQUESTED"];
-let attacks = [];
+const score = { attempts: 0, stopped: 0, waiting: 0, answered: 0, moved: 0, owasp: {} };
+const FAMILY_WAIT = ["AWAITING_FAMILY", "ALLOWANCE_REQUESTED", "READY_TO_CONFIRM"];
+let attacks = [], attackGroups = [];
 
 function renderScore() {
   $("sc-attempts").textContent = score.attempts;
   $("sc-stopped").textContent = score.stopped;
   $("sc-waiting").textContent = score.waiting;
-  $("sc-ready").textContent = score.ready;
+  $("sc-answered").textContent = score.answered;
   $("sc-moved").textContent = score.moved;
   $("score").querySelector(".s-moved").classList.toggle("bad", score.moved > 0);
+  const tally = $("owasp-tally");
+  tally.replaceChildren();
+  const ids = Object.keys(score.owasp).sort();
+  if (!ids.length) return;
+  tally.append(el("span", "Caught as:", "small muted"));
+  for (const id of ids) tally.append(el("span", `${id} ×${score.owasp[id]}`, "owasp"));
 }
 
 function renderChallengeTier() {
@@ -1128,24 +1341,44 @@ function renderChallengeTier() {
   box.append(b);
 }
 
-async function attack(message, title) {
+function kindOf(r) {
+  if (FAMILY_WAIT.includes(r.code)) return "waiting";
+  if (r.blocked || r.code === "CLARIFY") return "stopped";
+  return "answered";
+}
+
+async function attack(message, title, burst = 1) {
   const text = message.trim();
   if (!text) return;
   const before = state.payments.length;
   showStudentTab("assistant");
-  addUser(text);
-  const r = await act("student", "chat", { message: text });
+  addUser(text.length > 160 ? text.slice(0, 160) + "…" : text);
+  let r;
+  for (let i = 0; i < burst; i++) {
+    r = await act("student", "chat", { message: text });
+  }
   score.attempts += 1;
-  if (FAMILY_WAIT.includes(r.code)) score.waiting += 1;
-  else if (r.code === "READY_TO_CONFIRM") score.ready += 1;
-  else if (r.blocked || r.code === "CLARIFY") score.stopped += 1;
+  const kind = kindOf(r);
+  score[kind] += 1;
+  if (r.threat && r.threat.owasp && r.threat.level !== "note") score.owasp[r.threat.owasp] = (score.owasp[r.threat.owasp] || 0) + 1;
   if (state.payments.length > before) score.moved += state.payments.length - before;   // chat can never do this
   renderScore();
   const why = (r.text.split("\n").find((l) => l.startsWith("Why: ")) || "").replace(/^Why: /, "");
-  const li = el("li", undefined, "attempt");
+  const li = el("li", undefined, "attempt" + (r.threat && r.threat.level === "danger" ? " hot" : ""));
   const head = el("div", undefined, "a-head");
-  head.append(el("span", human(r.code), "code " + codeClass(r)), el("b", title || text));
+  head.append(el("span", human(r.code), "code " + codeClass(r)), el("b", title || (text.length > 90 ? text.slice(0, 90) + "…" : text)));
+  if (burst > 1) head.append(el("span", `×${burst}`, "owasp"));
   li.append(head, el("div", outcome(r.code)[0], "a-out"));
+  if (r.threat) {
+    const t = el("div", undefined, "a-caught");
+    t.append(el("strong", r.threat.level === "note" ? "Noted: " : "Caught as: "),
+      document.createTextNode(r.threat.label + (r.threat.owasp ? ` · OWASP ${r.threat.owasp}` : "")));
+    li.append(t);
+  } else if (kind === "stopped") {
+    li.append(el("div", "No wording gave it away. A payment rule stopped it, using the stored data.", "a-caught"));
+  } else if (kind === "answered") {
+    li.append(el("div", "Not recognised as an attack, so it was answered like any ordinary request. Chat can never move money by itself.", "a-caught"));
+  }
   if (why) li.append(el("div", why, "a-why"));
   const see = el("button", "Show it in the Glass Box", "btn small");
   see.type = "button";
@@ -1158,20 +1391,147 @@ async function attack(message, title) {
 function renderAttacks() {
   const box = $("attacks");
   box.replaceChildren();
-  for (const a of attacks) {
-    const b = el("button", undefined, "attack");
-    b.type = "button";
-    b.append(el("strong", a.title), el("span", a.says));
-    b.onclick = () => attack(a.message, a.title);
-    box.append(b);
+  for (const g of attackGroups) {
+    const list = attacks.filter((a) => a.group === g.id);
+    if (!list.length) continue;
+    const sec = el("details", undefined, "agroup");
+    sec.open = g.id === "fraud" || g.id === "injection";
+    const sum = el("summary");
+    sum.append(el("span", g.title), el("span", g.owasp ? `OWASP ${g.owasp}` : "no model involved", "owasp"), el("span", String(list.length), "gcount"));
+    sec.append(sum);
+    const grid = el("div", undefined, "attacks");
+    for (const a of list) {
+      const b = el("button", undefined, "attack");
+      b.type = "button";
+      b.append(el("strong", a.title), el("span", a.says));
+      b.onclick = () => attack(a.message, a.title, a.burst || 1);
+      grid.append(b);
+    }
+    sec.append(grid);
+    box.append(sec);
   }
 }
 
+function showChallengeTab(name) {
+  document.querySelectorAll("#challenge .ctabs button").forEach((b) => b.classList.toggle("on", b.dataset.ctab === name));
+  document.querySelectorAll("#challenge .ctab").forEach((p) => { p.hidden = p.dataset.cpane !== name; p.classList.toggle("on", p.dataset.cpane === name); });
+}
+
 async function openChallenge() {
-  if (!attacks.length) { attacks = await api("/api/attacks"); renderAttacks(); }
+  if (!attacks.length) {
+    const res = await api("/api/attacks");
+    attacks = res.attacks;
+    attackGroups = res.groups;
+    renderAttacks();
+  }
   renderChallengeTier();
   renderScore();
+  renderLabPayees();
   $("challenge").showModal();
+}
+
+// ------------------------------------------------------------------ invoice lab
+// Bills made on the spot. The screen never learns a full account number, so the account on a made bill is chosen
+// by name (saved, one digit changed, another payee's, or typed digits). Gate 1 judges it like any other bill.
+function renderLabPayees() {
+  const sel = $("lab-payee");
+  const have = new Set([...sel.options].map((o) => o.value));
+  const payees = state.book.payees.filter((p) => p.account);
+  if (payees.length === have.size && payees.every((p) => have.has(p.id))) return;
+  sel.replaceChildren(...payees.map((p) => {
+    const o = el("option", `${p.name} · ${p.type.replace(/_/g, " ")}`);
+    o.value = p.id;
+    return o;
+  }));
+}
+
+function labVerdict(inv, r, gen) {
+  const box = $("lab-result");
+  box.replaceChildren();
+  const card = el("div", undefined, "lab-card");
+  if (gen) {
+    card.append(el("div", gen.title, "lab-title"), el("div", gen.says, "small muted"));
+  }
+  const verdict = el("div", undefined, "lab-verdict");
+  verdict.append(el("span", human(r.code), "code " + codeClass(r)));
+  const why = (r.text.split("\n").find((l) => l.startsWith("Why: ")) || "").replace(/^Why: /, "");
+  verdict.append(el("span", why || outcome(r.code)[0]));
+  card.append(verdict);
+  if (gen) {
+    const ok = gen.expect === null ? !(r.blocked && Gate1.has(r.code)) : r.code === gen.expect;
+    const cmp = el("div", undefined, "lab-compare " + (ok ? "ok" : "bad"));
+    cmp.append(el("strong", ok ? "As the plan requires" : "Does not match the plan"),
+      document.createTextNode(` · the plan's rules say: ${gen.expect === null ? "the bill passes Gate 1 (it may still wait for the family or the student)" : human(gen.expect)}`));
+    card.append(cmp);
+    card.append(el("div", `seed ${gen.seed}, so the same bill can be made again`, "small muted"));
+  }
+  if (inv) {
+    card.append(invoiceDoc(inv));
+    if (inv.xray.suspicious) card.append(el("h3", "What the code found on this bill", "inv-h"), xrayCard(inv));
+    else card.append(el("p", "This bill matches the saved payee and its saved account.", "xr-ok"));
+  }
+  box.append(card);
+}
+const Gate1 = new Set(["INVOICE_NOT_FOUND", "PAYEE_NOT_MATCHING_INVOICE", "PAYEE_NOT_VERIFIED", "ACCOUNT_CHANGED",
+  "ACCOUNT_ON_HOLD", "INVOICE_REQUIRED", "INVOICE_ALREADY_PAID", "QUOTE_EXPIRED", "AMOUNT_NOT_MATCHING_INVOICE", "DOCS_MISSING"]);
+
+async function labTry(message, id, gen) {
+  showStudentTab("assistant");
+  addUser(message);
+  const r = await act("student", "chat", { message });
+  const inv = id ? state.book.invoices.find((i) => i.id === id) : null;
+  labVerdict(inv, r, gen);
+  return r;
+}
+
+async function labMake(e) {
+  e.preventDefault();
+  const spec = {
+    payee_id: $("lab-payee").value, kind: $("lab-kind").value, amount: $("lab-amount").value,
+    issuer: $("lab-issuer").value, account_mode: $("lab-account-mode").value, account_number: $("lab-account").value,
+    memo: $("lab-memo").value, claims_new_account: $("lab-claims").checked, date: $("lab-date").value || undefined,
+  };
+  const r = await act("operator", "add_invoice", spec);
+  if (r.blocked) { $("lab-result").replaceChildren(el("p", r.text.split("\n").find((l) => l.startsWith("Why: ")).slice(5), "lab-error")); return; }
+  const id = r.data.invoice_id;
+  await labTry(`pay invoice ${id}`, id, null);
+}
+
+async function labRandom() {
+  const g = await act("operator", "generate_invoice", {});
+  if (g.blocked) return;
+  await labTry(g.data.message, g.data.invoice_id, g.data);
+}
+
+async function labBatch() {
+  const btn = $("lab-batch");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  const r = await act("operator", "check_random_bills", { n: 100, seed: Math.floor(Math.random() * 1000000) });
+  btn.disabled = false;
+  btn.textContent = "Check 100 random bills";
+  if (r.blocked) return;
+  const d = r.data, box = $("lab-result");
+  box.replaceChildren();
+  const card = el("div", undefined, "lab-card");
+  card.append(el("div", `${d.as_expected} / ${d.count}`, "lab-big " + (d.as_expected === d.count ? "ok" : "bad")),
+    el("div", "random bills got the answer the plan requires, and none moved money.", "small muted"));
+  const table = el("table", undefined, "lab-table");
+  const head = el("tr");
+  ["What was changed on the bill", "Bills", "As the plan requires"].forEach((h) => head.append(el("th", h)));
+  table.append(head);
+  for (const [, row] of Object.entries(d.by_scenario).sort((a, z) => a[1].title.localeCompare(z[1].title))) {
+    const tr = el("tr");
+    tr.append(el("td", row.title), el("td", String(row.bills)), el("td", String(row.as_expected), row.as_expected === row.bills ? "ok" : "bad"));
+    table.append(tr);
+  }
+  card.append(table);
+  if (d.wrong.length) {
+    card.append(el("h3", "Not as the plan requires", "inv-h"));
+    for (const w of d.wrong) card.append(el("div", `seed ${w.seed} · ${w.title}: plan says ${human(w.expected)}, got ${human(w.code)}`, "lab-error"));
+  }
+  card.append(el("p", `Seeds ${d.seed} to ${d.seed + d.count - 1}. Run it again for different bills.`, "small muted"));
+  box.append(card);
 }
 
 // ------------------------------------------------------------------ judge tour (F3)
@@ -1261,7 +1621,8 @@ function wire() {
   try { dark = localStorage.getItem("sb-theme") === "dark"; } catch (e) { /* storage blocked */ }
   applyTheme(dark);
   $("theme").onclick = () => applyTheme(document.documentElement.dataset.theme !== "dark");
-  document.querySelectorAll(".tabbar button").forEach((b) => { b.onclick = () => showStudentTab(b.dataset.stab); });
+  document.querySelectorAll("#pane-student .tabbar button").forEach((b) => { b.onclick = () => showStudentTab(b.dataset.stab); });
+  document.querySelectorAll(".fam-tabbar button").forEach((b) => { b.onclick = () => showFamTab(b.dataset.ftab); });
   for (const q of QUICK) {
     const b = el("button", undefined, "qa");
     b.type = "button";
@@ -1336,8 +1697,15 @@ function wire() {
   });
   $("open-stories").onclick = () => { renderStories(); $("stories").showModal(); };
   $("close-stories").onclick = () => $("stories").close();
-  $("tour").onclick = () => startTour();
+  $("steps-toggle").onclick = () => { showAllSteps = !showAllSteps; renderGlass(); };
+  $("tour-play").onclick = () => { $("stories").close(); startTour(); };
   $("open-challenge").onclick = openChallenge;
+  document.querySelectorAll("#challenge .ctabs button").forEach((b) => { b.onclick = () => showChallengeTab(b.dataset.ctab); });
+  $("lab-form").addEventListener("submit", labMake);
+  $("lab-random").onclick = labRandom;
+  $("lab-batch").onclick = labBatch;
+  $("lab-account-mode").onchange = () => { $("lab-typed").hidden = $("lab-account-mode").value !== "typed"; };
+  $("rb-close").onclick = clearAlert;
   $("challenge-close").onclick = () => $("challenge").close();
   $("attack-form").addEventListener("submit", (e) => {
     e.preventDefault();

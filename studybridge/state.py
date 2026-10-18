@@ -85,9 +85,7 @@ def load(sandbox, data: dict):
     a.session.spent_today_home = data["session"]["spent_today_home"]
     a.session.spent_on = data["session"]["spent_on"]
     a.pending = data["pending"]
-    imp = data.get("impact") or {}
-    sandbox.impact = {"protected_bdt": imp.get("protected_bdt", Decimal(0)), "scams": list(imp.get("scams", [])),
-                      "fees_saved_bdt": imp.get("fees_saved_bdt", Decimal(0))}
+    sandbox.impact = {"scams": list((data.get("impact") or {}).get("scams", []))}
     a._confirm_failures = list(data["confirm_failures"])
     w.balances = ww["balances"]
     w.beneficiaries.clear()                      # the payment book shares this dict, so change it in place

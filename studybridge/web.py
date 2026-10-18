@@ -10,10 +10,7 @@ CSRF); request bodies are capped at 8 KB; responses carry a strict CSP and
 the page renders all text with textContent, never innerHTML. The role
 switch is a sandbox demo control: there is no user login (known risk).
 """
-import base64
-import hmac
 import json
-import os
 import shutil
 import tempfile
 import threading
@@ -22,20 +19,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import PACKAGE_ROOT
-from .challenge import ATTACKS
+from .challenge import ATTACKS, GROUPS
 from .security.audit import AuditLog
 from .stories import STORY_BY_ID
 
 STATIC = PACKAGE_ROOT / "static"
 MAX_BODY = 8 * 1024
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-
-
-def _allowed_hosts() -> set:
-    """Local names, plus host names the operator lists in STUDYBRIDGE_ALLOWED_HOSTS (comma-separated, no port).
-    Empty by default. Only for a deliberate public demo of the sandbox (see README 'Hosted demo')."""
-    extra = {h.strip().lower() for h in os.environ.get("STUDYBRIDGE_ALLOWED_HOSTS", "").split(",") if h.strip()}
-    return _LOCAL_HOSTS | extra
 _FILES = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
           "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
@@ -81,19 +71,14 @@ def _tamper_in(path: Path, tmp: Path) -> dict:
 
 def _make_handler(sandbox):
     lock = threading.Lock()
-    allowed = _allowed_hosts()
-    # Optional gate for a public demo: HTTP Basic with a shared password (any user name). Not a user login.
-    password = os.environ.get("STUDYBRIDGE_DEMO_PASSWORD") or None
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
 
-        def _send(self, code, body: bytes, ctype="application/json", headers=()):
+        def _send(self, code, body: bytes, ctype="application/json"):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
-            for k, v in headers:
-                self.send_header(k, v)
             self.send_header("Content-Security-Policy",
                              "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -109,34 +94,16 @@ def _make_handler(sandbox):
             """Only answer requests addressed to this machine. A DNS-rebinding page sends its own host name
             in Host, and a cross-site page sends its own Origin; both are refused."""
             host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
-            if host not in allowed:
+            if host not in _LOCAL_HOSTS:
                 return False
             origin = self.headers.get("Origin")
-            if post and origin and (urlsplit(origin).hostname or "").lower() not in allowed:
+            if post and origin and (urlsplit(origin).hostname or "").lower() not in _LOCAL_HOSTS:
                 return False
             return True
-
-        def _authorized(self) -> bool:
-            if password is None:
-                return True
-            try:
-                kind, _, token = (self.headers.get("Authorization") or "").partition(" ")
-                if kind.lower() != "basic":
-                    return False
-                given = base64.b64decode(token.strip()).decode("utf-8").partition(":")[2]
-            except (ValueError, UnicodeDecodeError):
-                return False
-            return hmac.compare_digest(given.encode(), password.encode())
-
-        def _need_password(self):
-            return self._send(401, b'{"error": "password required"}',
-                              headers=[("WWW-Authenticate", 'Basic realm="StudyBridge demo", charset="UTF-8"')])
 
         def do_GET(self):
             if not self._local():
                 return self._json(403, {"error": "unexpected host"})
-            if not self._authorized():
-                return self._need_password()
             self.path = urlsplit(self.path).path
             if self.path in _FILES:
                 name, ctype = _FILES[self.path]
@@ -147,7 +114,8 @@ def _make_handler(sandbox):
                 if self.path == "/api/stories":
                     return self._json(200, sandbox.stories())
                 if self.path == "/api/attacks":
-                    return self._json(200, ATTACKS)
+                    return self._json(200, {"groups": [{"id": g, "title": t, "owasp": o} for g, t, o in GROUPS],
+                                            "attacks": ATTACKS})
                 if self.path == "/api/audit/tail":
                     return self._json(200, _audit_tail(sandbox.audit.path))
                 if self.path == "/api/audit/verify":
@@ -157,8 +125,6 @@ def _make_handler(sandbox):
         def do_POST(self):
             if not self._local(post=True):
                 return self._json(403, {"error": "unexpected host or origin"})
-            if not self._authorized():
-                return self._need_password()
             if self.headers.get("X-StudyBridge") != "1" or \
                     not self.headers.get("Content-Type", "").startswith("application/json"):
                 return self._json(403, {"error": "missing required header"})

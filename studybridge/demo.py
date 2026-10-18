@@ -44,9 +44,21 @@ INFO_REQUESTS = [
 ]
 
 
-def _impact(sandbox) -> dict:
-    i = sandbox.snapshot()["impact"]
-    return {"protected_bdt": i["protected_bdt"], "scams_stopped": i["scams_stopped"], "fees_saved_bdt": i["fees_saved_bdt"]}
+# Wording the rules reader does not read as a payment (it answers "help" or a planner instead). They show what Qwen
+# can add: with Qwen on, the student may be offered Qwen's reading as a question. No pass/fail is claimed for
+# them: the result is recorded as it happened.
+WORDING_CHECKS = [
+    "please clear my tuition fee INV-0003",
+    "I would like to get the semester fee INV-0003 taken care of",
+    "can you take care of the canteen thing, 38 yuan",
+]
+
+
+RANDOM_BILLS = 200
+
+
+def _scams(sandbox) -> int:
+    return sandbox.snapshot()["impact"]["scams_stopped"]
 
 
 def run_demo(args, out_root: Path):
@@ -77,14 +89,14 @@ def run_demo(args, out_root: Path):
     results, codes = [], Counter()
     guard_cuts = 0
     for story in STORIES:
-        before = _impact(sandbox)
+        before = _scams(sandbox)
         steps = sandbox.run_story(story.id)
         ok = all(s["ok"] for s in steps)
-        after = _impact(sandbox)
+        after = _scams(sandbox)
         results.append({"story": story.id, "title": story.title, "group": GROUPS[story.group],
                         "outcome": steps[-1]["response"]["code"], "expected_outcomes_met": ok,
                         "codes": [s["response"]["code"] for s in steps],
-                        "impact_added": {k: str(after[k] - before[k]) for k in after}})
+                        "scams_stopped_added": after - before})
         md += [f"## {story.id}. {story.title}", "", f"*{story.shows}*", ""]
         if story.setup:
             md += [f"> Story setup (sandbox only): `{json.dumps(story.setup)}`", ""]
@@ -119,6 +131,41 @@ def run_demo(args, out_root: Path):
             md += ["Sentences removed by the grounding guard:", ""] + [f"- ~~{x}~~" for x in r["guard_removed"]] + [""]
         print(f"[info] {'ok  ' if ok else 'FAIL'} {request}")
 
+    md += ["## Wording checks", "",
+           "*Messages the rules reader does not read as a payment. Nothing here is a pass/fail test: it records what "
+           "the readers did. Rules-only runs answer with whatever the rules reader understood (help text or a plan); "
+           "with Qwen on, Qwen's reading may be offered to the student as a question. Nothing is paid here.*", ""]
+    wording = []
+    for request in WORDING_CHECKS:
+        sandbox.reset()
+        r = sandbox.act("student", "chat", {"message": request}).to_dict()
+        role = (sandbox.agent.cases[r["case_id"]]["glass"]["parse"]["role"]["reading"]) if r.get("case_id") else None
+        wording.append({"request": request, "code": r["code"], "intent": r["intent"], "reading": role,
+                        "offered_qwen_reading": bool(r.get("reading"))})
+        md += [f"**Student** `{request}` → **{r['code']}** (reading: {role})  ", "", "```", r["text"], "```", ""]
+        print(f"[wording] {r['code']:10s} reading={role}  {request}")
+
+    scams_total = _scams(sandbox)           # the scam counter covers the stories only, not the random bills below
+    md += ["## Random bills", "",
+           f"*{RANDOM_BILLS} bills made at random by the Invoice lab (seeds 0 to {RANDOM_BILLS - 1}). Each one is a genuine "
+           "bill changed in one known way; the answer it must get comes from the plan's rules, not from Gate 1. "
+           "Every bill is then sent through the same chat path as a student's request.*", ""]
+    from .invoicelab import run_check
+    random_bills, by_scenario = [], {}
+    for seed in range(RANDOM_BILLS):
+        sandbox.reset()
+        res = run_check(sandbox, seed)
+        random_bills.append({"seed": seed, "scenario": res["scenario"], "expected": res["expected"],
+                             "code": res["code"], "as_expected": res["ok"]})
+        row = by_scenario.setdefault(res["scenario"], [0, 0])
+        row[0] += 1
+        row[1] += res["ok"]
+    good = sum(b["as_expected"] for b in random_bills)
+    md += ["| Scenario | Bills | As expected |", "|---|---|---|"] + \
+          [f"| {k} | {v[0]} | {v[1]} |" for k, v in sorted(by_scenario.items())] + \
+          ["", f"Total: {good}/{len(random_bills)} as expected; no payment was executed in this section.", ""]
+    print(f"[random bills] {good}/{len(random_bills)} as expected")
+
     verification = audit.verify()
     head = {"records": verification.get("records"), "head_hash": audit._last}
     tampered = out / "audit_tampered_copy.jsonl"
@@ -130,13 +177,16 @@ def run_demo(args, out_root: Path):
     tamper_result = AuditLog(tampered).verify()
 
     passed = sum(r["expected_outcomes_met"] for r in results)
-    impact_total = _impact(sandbox)
     summary = {"run_id": run_id, "version": __version__, "clock_start": start.isoformat(),
                "llm": llm.model if llm else None, "stories": len(results), "stories_as_expected": passed,
                "outcome_codes": dict(sorted(codes.items())), "executed": codes["EXECUTED"],
                "guard_sentences_cut": guard_cuts, "results": results,
                "info_requests": info, "info_requests_as_expected": sum(i["as_expected"] for i in info),
-               "impact_total": {k: str(v) for k, v in impact_total.items()},
+               "scams_stopped": scams_total,
+               "random_bills": {"count": len(random_bills), "as_expected": good,
+                                "by_scenario": {k: {"bills": v[0], "as_expected": v[1]} for k, v in sorted(by_scenario.items())},
+                                "bills": random_bills},
+               "wording_checks": wording, "readers_per_message": dict(sorted(sandbox.qwen_roles.items())),
                "audit_head": head,
                "audit_verification": verification, "tamper_test_on_copy": tamper_result,
                "python": sys.version.split()[0]}
@@ -144,10 +194,10 @@ def run_demo(args, out_root: Path):
     md += ["## Result", "", f"- Stories with all expected outcomes: {passed}/{len(results)}",
            f"- Information requests answered as expected: {sum(i['as_expected'] for i in info)}/{len(info)}",
            f"- Audit head (to detect a truncated log later): {head['records']} records, hash {head['head_hash']}",
+           f"- Random bills answered as the plan's rules require: {good}/{len(random_bills)}",
            f"- Executed payments: {codes['EXECUTED']}; sentences cut by the guard: {guard_cuts}",
-           f"- Impact counter after all stories (sandbox session): BDT {impact_total['protected_bdt']:,} protected, "
-           f"{impact_total['scams_stopped']} scams stopped, BDT {impact_total['fees_saved_bdt']:,} saved against a bank wire. "
-           "Each story's own share is in summary.json (`impact_added`).",
+           f"- Scams stopped across all stories (each counted once): {scams_total}. "
+           "Each story's share is in summary.json (`scams_stopped_added`).",
            f"- Audit chain verification: {verification}",
            f"- Tamper test (one character changed in a copy): {tamper_result}", ""]
     (out / "transcript.md").write_text("\n".join(md), encoding="utf-8")

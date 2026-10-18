@@ -1,6 +1,6 @@
 # StudyBridge — Technical Documentation
 
-Topic C: Cross-border & Student Finance Assistant · version 0.4.0 (plan v4: three-gate safe payments, plus the v0.4 demo features of §3.7)
+Topic C: Cross-border & Student Finance Assistant · version 0.4.0 (plan v4: three-gate safe payments)
 
 Labels used below: **BUILT** (in this code), **ASSUMPTION** (team design, illustrative), **TEAM-STATED** (a teammate's experience, no public source found), **VERIFIED** (public source; see the plan's fact check).
 
@@ -107,10 +107,6 @@ Key design decisions:
 | `payments.py` | Payee types, Gate 1, everyday path, allowances (single-use and monthly rent), one-day limit raises, new-account checks with a 24-hour hold, family approvals, simulated daily bank limit and review |
 | `reasons.py` | Every reason code with its plain meaning and fix step |
 | `clock.py` | Sandbox clock, so 24 h / 72 h / 2 min windows can be tested and demonstrated |
-| `state.py` | Optional saved state for the web demo (`--state FILE`): approvals, allowances, balances and today's totals as JSON, restored at start |
-| `xray.py` | Invoice X-ray view data: which digits, letters and phrases look wrong (positions only, never full account numbers) |
-| `challenge.py` | The ready-made attacks of the "Try to scam it" panel |
-| `bangla.py` | Banglish and Bangla words for the rules reader |
 | `agent.py` | The 11-step workflow: parsing, routing, policy, gates, approvals, confirmation, explanation, Glass Box cases |
 | `sandbox.py` | One session with three actors (student, family, operator); the single `act()` entry point |
 | `stories.py` | The 31 test stories as data (used by tests, evidence run and UI autopilot) |
@@ -322,39 +318,126 @@ The permission tier is shown as **Assistant can** with plain names (Rates only, 
 with me, Make payments). **Play stories** plays any of the 31 stories step by step through
 the real app (`/?story=A6` or `/?story=all` starts one on load, which is useful for recording).
 
-### 3.7 v0.4 demo features (view only)
+### 3.7 Demo features merged from Nura's copy, and safer next steps (17 October)
 
-None of these changes a decision, a code, a story or an expected outcome. Each one draws something the code
-already knew, and the 31 stories and their expected codes are unchanged.
+None of the view features changes a decision, a story or an expected outcome; the 31 stories and their
+expected codes are unchanged. Built by Nura, merged and adjusted on 17 October 2026.
 
-- **Invoice X-ray** (`xray.py`, `PaymentBook.snapshot()`): for every invoice the snapshot adds the issuer split into plain,
-  misspelled, missing-letter and extra-word parts (compared with the saved payee's name), the positions where the
-  bill's account differs from the saved one (positions and the last four digits only), the saved payee that
-  owns that account (if any), the memo split into pressure and injection phrases (from the guard's own patterns,
-  with long digit runs masked), and the code Gate 1 returns for the bill (Gate 1 is re-run read-only). A test
-  checks that no full account number appears in the snapshot and that the shown code equals Gate 1's.
-- **Impact counter** (`Sandbox._tally()`): *BDT protected* adds an invoice's amount at the mid rate when a chat request
-  for it ends as `PAYEE_NOT_VERIFIED` or `ACCOUNT_CHANGED`, once per invoice id. *Scams stopped* counts those
-  plus `INJECTION_DETECTED` messages (once per message text; an injection attempt adds no BDT). *Fees saved* is the
-  cost of the same tuition transfer as a bank wire (`bank_swift`, via `remittance.source_needed`) minus what the chosen
-  provider charged, added when a tuition payment executes. The numbers live on the `Sandbox`, so story resets keep
-  them; only the operator's Reset clears them. All are labelled "sandbox session". Result: B1, B2, B6, B8, B9 give BDT 1,808,800
-  and 5 scams; A1 adds BDT 10,571.09 (BDT 447,680.19 for a wire against BDT 437,109.10).
-- **Money-route map** (Glass Box): nodes for the family wallet, Gate 1, family approval, bank review, student
-  confirmation, provider and destination, coloured from the case's step statuses. The provider, fee and rate come
-  from `case["funding"]`, which `_prepare_payment()` records.
-- **Judge tour** (`app.js`): runs stories A1, B2, B6, A6 and D2 through the normal story runner in presenter mode,
-  then the audit verify and tamper test. Nothing is added to the backend.
-- **Scam challenge** (`challenge.py`, `/api/attacks`): the panel sends each attack as a normal student chat message through
-  `/api/act`. A test sends every ready-made attack to a fresh sandbox and checks that it is refused or waits for the
-  family, and that no payment executes. The scoreboard's "money moved" counts any rise in executed payments after
-  an attack; chat can only prepare a payment, so it stays 0.
-- **Bangla** (`static/reasons_bn.js`, `i18n.js`, `bangla.py`): the family phone shows a "Stopped for your student" list
-  with the meaning and fix step of every reason code in Bangla, and the two scam warnings in Bangla. The rules
-  reader understands common Banglish and Bangla payment, balance, rate and tuition phrases and Bangla digits;
-  the guard catches Banglish and Bangla override phrases. All Bangla text is a first draft for a native speaker to proofread.
-- **Small fixes**: an expired 2-minute confirmation no longer shows on the phone; a zero amount has its own code
-  (`AMOUNT_NOT_POSITIVE`); audit records carry `sandbox_ts`; the tamper-test copy is deleted after use.
+- **Invoice X-ray** (`xray.py`, `PaymentBook.snapshot()`): for every invoice the snapshot adds the issuer
+  compared with the saved payee's name (letters that differ, a missing letter, an extra word), the positions
+  where the bill's account differs from the saved one (positions and the last four digits only), the saved
+  payee that owns that account if any, the memo split into pressure and injection phrases (the guard's own
+  patterns, long digit runs masked), and the code Gate 1 returns for the bill (Gate 1 re-run read-only). The
+  screen shows the bill exactly as written: a missing letter is a gap ("Univers▯ty") with a sentence saying
+  which letter is missing. It opens from **Why?** in Bills and by itself in the Glass Box when Gate 1 stops a
+  bill on its account, name or wording. A test checks that no full account number reaches the snapshot.
+- **Try to scam it** (`challenge.py`, `/api/attacks`): ready-made attacks (32 since v0.4, see 3.8) and a free-text box, each sent
+  as an ordinary student chat message through `/api/act`, so every gate, tier and actor check applies. A
+  scoreboard counts attempts, stopped, waiting for the family, waiting for the student, and money moved
+  without both (always 0). A test sends every attack to a fresh sandbox and checks that nothing executes.
+- **Scam counter** (`Sandbox._tally()`): the number of scams the code stopped in this session (a chat request
+  ending as `PAYEE_NOT_VERIFIED`, `ACCOUNT_CHANGED` or `INJECTION_DETECTED`), each counted once; only the
+  operator's Reset clears it. Nura's "BDT protected" and "saved vs a bank wire" figures were left out: the
+  first counts the sandbox's own fake invoices at face value, the second rests on illustrative provider fees.
+- **Glass Box layout**: the money-route map (family wallet, safety checks, family, bank review, student,
+  provider, destination, coloured from the case's step statuses) sits at the top; the outcome, why and what to
+  do sit under it; the step list shows only the step that stopped or waits, with "Show all steps".
+- **Judge tour**: a choice in the Play stories window that plays A1, B2, B6, A6 and D2 in presenter mode,
+  then the audit tamper test (`/?tour=1` starts it on load). No backend part.
+- **Bangla** (`static/reasons_bn.js`, `i18n.js`, `bangla.py`): the family phone lists what was stopped for the
+  student, with every reason and fix step in Bangla. The rules reader understands common Banglish and Bangla
+  payment, balance, rate and tuition phrases and Bangla digits; the guard catches Banglish and Bangla override
+  phrases. **Note:** with Qwen off, all six test phrases are read correctly. With Qwen on (17 October,
+  qwen2.5:7b), four of six are; "ক্যান্টিনে ৩৮ ইউয়ান দাও" and "100 usd er dam koto" end as a question back
+  (`CLARIFY`), because Qwen reads them differently and the two readers must agree. That is the safe outcome:
+  nothing is prepared until the student confirms the rules reader's reading. All Bangla text is a first draft
+  for a native speaker to proofread.
+- **Next steps the student can take**: vague fix steps were rewritten as actions possible in this app (for
+  example `PAYEE_NOT_VERIFIED`: "Do not pay this bill. Pay the payee's own bill instead, or ask the payee for
+  one, and tell your family"). After a look-alike, agent or personal-wallet bill, the chat offers one tap to
+  the payee's own open bill for the same amount on its saved account (`_safe_alternative()`: INV-0003 for
+  INV-0004/5/6), and after a wrong amount, the same bill as stored. Bills of an agent payee get no such
+  offer. A missing invoice offers "Open Bills". The suggestion comes from stored data only.
+- **Hardening**: after 5 confirmations with an unknown id within 60 s, confirming locks for that window
+  (`CONFIRMATION_LOCKED`); a zero or negative amount has its own code (`AMOUNT_NOT_POSITIVE`); an expired
+  confirmation no longer shows; audit records carry `sandbox_ts`; every append writes `<log>.head`, so a log
+  with its newest records cut off fails verification; the tamper-test copy is deleted after use; optional
+  saved state (`web --state FILE`, see the security self-assessment, R7).
+
+- **Numbers in Qwen's explanation come from code** (`slots.py`): Qwen is sent the facts plus one placeholder per
+  number and must write `{amount}` instead of digits; code fills in the values. A sentence with a typed digit (other
+  than an id, date or masked account copied from the facts) or an unknown placeholder is cut; percentages get "%".
+  The status-word and banned-term guard still runs afterwards. Known limits: a placeholder next to the wrong word,
+  and false claims without numbers (security self-assessment, R3).
+- **Small university fees** (`agent._small_university_fee()`): a university bill that is not tuition and fits
+  within today's family daily limit goes straight to the student's confirmation, without using up that limit;
+  Gate 1, the caps and the confirmation still apply, and the rule is checked again at payment
+  (`FAMILY_APPROVAL_NEEDED`). The lab fee INV-0007 (CNY 350) now takes this route. Story D1's hidden
+  instruction moved to a new hostel deposit, INV-0008 (CNY 2,000), which still waits for the family.
+- **Tuition and agents**: tuition goes only to a payee saved as the institution. The refusal cites Bangladesh Bank
+  FEPD-1 Circular No. 40 (30 Sep 2026), para 10: education payments go "in favor of the institution concerned", or to
+  a "designated intermediary payment processing entity" named in the admission documents; a university's named
+  payment company would be saved by the family as an institution payee. Non-tuition bills from an agent (a service
+  fee) follow the everyday path with a stored bill and family approval.
+- **Invoice viewer**: every bill opens as printed (issuer, address, bill-to with student ID, line items, total,
+  the bank that owns the account on the bill, the masked account with differing digits marked, the printed note),
+  followed by the X-ray when it is suspicious and the stories that use it. It opens from Bills on both phones, from
+  every approval card and from "Stopped for your student". The family phone has three tabs: Approvals, Bills, Settings.
+- **Stopped for your student**: each stopped payment has "Got it" (`ack_alert`, family only, audit-logged); seen
+  ones move to "Seen earlier".
+- **Glass Box**: labelled "for judges and reviewers". Its AI tab shows both readings of the message side by side,
+  where the amount came from, and exactly what Qwen was sent and wrote.
+
+### 3.8 Attack handling, the Qwen role and the Invoice lab (v0.4, 18 October)
+
+None of this changes a gate, a limit, a story or an expected outcome. It makes attacks recognisable and the
+model's role visible, and it tests bills the sample file does not contain.
+
+- **Threat layer** (`security/threats.py`). Patterns for instruction override (including spaced letters,
+  look-alike characters, leetspeak and base64 after `guard.deobfuscate()`), requests for secrets, requests for the
+  assistant's own instructions, claims to be the family or the admin, orders to change a limit, and markup. Each
+  kind has a label, an OWASP LLM Top 10 (2025) id and a code. The order in `handle()` is: flood limit (30
+  messages a minute) → length limit (600 characters) → `threats.detect` → refusal *before* Qwen is called → the
+  existing approve-in-chat check → parsing. A refusal carries the kind's own code (`INJECTION_DETECTED`,
+  `SECRET_REQUEST`, `ACTOR_NOT_PERMITTED`, `INPUT_TOO_LONG`, `TOO_MANY_MESSAGES`). Markup is noted, not refused
+  (the page shows text only). Claimed approval ("my mother already approved") counts only on money-moving
+  intents, and a question about limits is answered, not refused. **Detection is labelling:** an attack no pattern
+  recognises still cannot move money, because chat text never chooses a payee, account, actor, permission or
+  approval.
+- **Qwen's role on screen.** Every case records which reader decided (`glass["role"]`) and `Sandbox.qwen_roles`
+  counts them. The Glass Box card shows the reader, whether Qwen was asked, and what it was sent. When Qwen
+  reads a payment the rules reader missed, the result is offered to the student as a question written by code
+  ("Did you mean ...?"); it is single-use, tied to that message, and every gate still applies afterwards. When
+  the readers disagree, the existing CLARIFY path applies (now also showing Qwen's reading). With Qwen off
+  nothing about decisions changes.
+- **Try to scam StudyBridge** (`challenge.py`): 32 attacks in six groups (payment scams 8, prompt injection 10,
+  secrets and the assistant's instructions 5, excessive agency 4, output handling 1, unbounded consumption 2),
+  each with the outcome it must end in (`stopped`, `waits`, `answered`). A test sends every attack to a fresh
+  sandbox, checks the outcome and that no money moved. Free text goes through the same path and is named.
+- **Red alert.** When a response carries a threat (an attack kind, or a Gate 1 refusal for a look-alike
+  account or changed bank details), the page adds `body.redalert` (dark-red theme through CSS variables) and
+  opens a `popover="manual"` banner with the threat's name, OWASP id and "Nothing moved"; it clears after a few
+  seconds or on Dismiss. Only classes and `textContent` are used, so the strict CSP is unchanged.
+- **Invoice lab** (`invoicelab.py`). `make()` builds a bill from a payee, kind, amount, printed issuer name,
+  account mode (saved / one digit changed / another saved payee's / typed), note and date; `generate(seed)`
+  makes a bill from one of 15 scenarios: genuine controls and known
+  changes (one digit changed, two digits swapped, a stranger's account, another saved payee's account, a
+  misspelled issuer name with the real account, pressure wording, a hidden instruction in the note, a "bank
+  details changed" claim, tuition sent to an agent's account, a wrong amount, an expired quote, an already
+  paid bill, a bill that does not exist, a message naming another payee). The expected outcome is
+  derived from the plan's rules (not by calling Gate 1 on the same data): `GATE1_CODES` and the scenario give
+  the code that must come back. `run_check(n, seed0)` sends each bill through the normal chat in a throwaway
+  sandbox and reports mismatches and whether any money moved. Lab bills are held by the operator side only
+  (`add_invoice`, `generate_invoice`, `check_random_bills` are operator actions), appear in the sample's bill
+  list with id prefix `LAB-`, and are capped at 40. The check is also in the demo.
+- **Honest limits of the random check.** It tests the pipeline against 15 kinds of change that the team thought
+  of. It shows that those changes are caught, not that every possible bill is. A sabotage test (`test_the_check_notices_a_broken_rule`) breaks one rule on purpose and
+  requires the check to report mismatches, so the check is shown able to fail.
+- **Demo additions** (`demo.py`): a "Wording checks" section (three paraphrased requests that the rules reader
+  reads, to show which reader decided) and a "Random bills" section (200 seeded bills); `summary.json` gains
+  `wording_checks`, `readers_per_message` and `random_bills`.
+- **Research.** `docs/PROBLEM_RESEARCH.md` (sources read on 18 October 2026) and `tools/opinion_collect.py`
+  (collector for Reddit, YouTube and X posts, run by hand; never part of the app).
 
 ## 4. Security design (summary — full detail in SECURITY_SELF_ASSESSMENT.md)
 
@@ -442,8 +525,8 @@ regression test too.
 
 | Check | Result |
 |---|---|
-| Unit tests (v0.3) | 176 / 176 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
-| Scripted runs v0.4 | Rules-only: `evidence/run_20261017_145750_rules`, 31/31 stories and 5/5 information requests as expected, 11 executed payments, audit chain intact (370 records), tamper test detected at record 12. The Qwen run (qwen2.5:7b) is still to be made after the freeze; its counts go here and in `evidence/README.md` from its `summary.json` |
+| Unit tests (v0.4) | 218 / 218 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
+| Scripted runs v0.4 | To be generated from the final code after the freeze (rules-only and with qwen2.5:7b); the counts go here and in `evidence/README.md` from each `summary.json` |
 | v0.2 runs (`evidence/run_20261015_*`, earlier version, 25 stories) | rules-only 25/25; with Qwen 25/25, guard cut 15 sentences, 2 residual entity-binding errors; first Qwen run 24/25 (fixed, now regression tests) |
 | v0.1 runs (archived in `evidence/archive_v0.1/`) | run A rules-only, run B guard v1, run C guard v2: real history of the earlier version, kept unedited |
 
@@ -466,7 +549,7 @@ freeze; no log is edited by hand, and every number on a slide must match a file 
 - The August 2026 education-card channel is not modelled.
 - Country rules (Bangladesh Bank student-file outward-remittance rules, Chinese bank KYC,
   local credit bureaus) are not modelled. The assistant states this rather than guessing.
-- The rule parser reads English, plus a small first-draft list of Banglish and Bangla words and Bangla digits (`bangla.py`). It will miss many real spellings, and Chinese is not read. A native speaker should extend the lists.
+- The rule parser is English-only. A Bangla/Chinese parser is future work.
 - The grounding guard checks numbers, units, labels next to numbers, status words and banned
   terms. Its status-word list cannot cover every phrasing, and it still cannot tell when a real number
   is attached to the wrong thing in plain words with no label nearby. In run C, the model wrote "rent

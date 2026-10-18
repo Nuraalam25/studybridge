@@ -8,16 +8,16 @@ outcomes that are not refusals live in STATUS.
 REASONS = {
     # Gate 1: invoice, payee, documents
     "INVOICE_REQUIRED": ("This payee type needs a stored invoice, bill or quote.",
-                         "Choose or attach the invoice."),
-    "INVOICE_NOT_FOUND": ("No stored invoice has that id.", "Choose or attach the invoice."),
+                         "Pick the bill under Bills, or ask the payee to send one."),
+    "INVOICE_NOT_FOUND": ("No stored invoice has that id.", "Pick the bill under Bills, or ask the payee to send one."),
     "INVOICE_ALREADY_PAID": ("This invoice is already settled.", "Nothing to pay."),
     "QUOTE_EXPIRED": ("The shop's price quote is past its valid-until date.", "Ask the shop for a new quote."),
     "PAYEE_NOT_MATCHING_INVOICE": ("The payee in the request is not the payee on the invoice.",
-                                   "Pay the invoice as stored."),
+                                   "Pay the bill exactly as stored: the payee and amount printed on it."),
     "AMOUNT_NOT_MATCHING_INVOICE": ("The amount in the request is not the amount on the invoice.",
-                                    "Pay the invoice as stored."),
+                                    "Pay the bill exactly as stored: the payee and amount printed on it."),
     "PAYEE_NOT_VERIFIED": ("The account is an agent, look-alike, personal or unsaved account, "
-                           "not the payee's verified account.", "Use the verified account."),
+                           "not the payee's verified account.", "Do not pay this bill. Pay the payee's own bill instead, or ask the payee for one, and tell your family."),
     "ACCOUNT_CHANGED": ("The account on this bill differs from the saved account for this payee.",
                         "Do not pay the new account. Report it: the family checks it by calling the payee on the "
                         "number already on file (never a number on the bill), then a 24-hour wait follows."),
@@ -33,7 +33,7 @@ REASONS = {
     "DAILY_LIMIT_REACHED": ("This food or QR payment is more than what is left of today's family daily limit.",
                             "Ask the family to raise your limit for the day, with a short reason."),
     "SPLIT_PAYMENT_SUSPECTED": ("Several small payments to the same payee today add up past the cap.",
-                                "Lower or wait."),
+                                "Pay with one bill for the full amount, or wait until tomorrow."),
     "ALLOWANCE_NEEDED": ("The payment is above what is left of today's family daily limit.",
                          "Request an allowance."),
     "BANK_DAILY_LIMIT_REACHED": ("Card spending today would pass the simulated bank limit of USD 300 a day, and no "
@@ -41,7 +41,7 @@ REASONS = {
                                  "Wait until tomorrow, or request an allowance for a bill or quote so the simulated "
                                  "bank reviews it first."),
     "BANK_REVIEW_REJECTED": ("The simulated bank review did not accept the quote or purpose.",
-                             "Fix the quote."),
+                             "Ask the shop for a correct quote with the item and price, then request the allowance again."),
     "MONTHLY_ALREADY_OPEN": ("A monthly rent allowance for this landlord is already open or waiting.",
                              "Pay this month's bill with it; the family can cancel it to set a new one."),
     "MONTHLY_ONLY_FOR_RENT": ("A monthly allowance is only for rent bills from a saved landlord.",
@@ -55,13 +55,21 @@ REASONS = {
     "ALLOWANCE_LIMIT_REACHED": ("Three allowances are already open or waiting.",
                                 "Use an open allowance first, or ask the family to cancel one."),
     "APPROVAL_EXPIRED": ("The family approval window has passed.", "Request again."),
+    "FAMILY_APPROVAL_NEEDED": ("This university payment needs the family's approval.",
+                               "Ask again: the request goes to your family."),
     # Existing guardrails
     "AMOUNT_NOT_POSITIVE": ("The amount to pay is zero or negative.", "Enter an amount above zero."),
-    "ABOVE_HARD_CAP": ("The payment is above the BDT per-payment or daily hard cap.", "Lower or wait."),
-    "INSUFFICIENT_BALANCE": ("The wallet does not hold enough to fund this payment.", "Lower or wait."),
+    "ABOVE_HARD_CAP": ("The payment is above the BDT per-payment or daily hard cap.", "Pay a smaller amount, or wait until tomorrow when the daily total starts again."),
+    "INSUFFICIENT_BALANCE": ("The wallet does not hold enough to fund this payment.", "Ask your family to add money to the wallet, or pay a smaller amount."),
     # Security
     "INJECTION_DETECTED": ("The request contains instruction-override or 'pay everything' wording.",
                            "State a plain request, e.g. 'pay invoice INV-0003'."),
+    "SECRET_REQUEST": ("The message asks for something the assistant never gives out: its own instructions, "
+                       "passwords or keys, full account numbers, phone numbers or internal files.",
+                       "Ask about your payments instead. Bills show the last 4 digits of an account, and the Glass "
+                       "Box shows exactly what Qwen is sent."),
+    "INPUT_TOO_LONG": ("The message is longer than 600 characters.", "Write a shorter request."),
+    "TOO_MANY_MESSAGES": ("More than 30 messages in one minute.", "Wait a minute, then ask again."),
     "ACTOR_NOT_PERMITTED": ("This role cannot perform this action.",
                             "The right person must do it from their own screen."),
     "TIER_TOO_LOW": ("The assistant does not have permission to do this.",

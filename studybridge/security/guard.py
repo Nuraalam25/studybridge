@@ -12,6 +12,7 @@ untrusted-text handling
     to choose a tool or fill an argument.
 """
 import re
+import unicodedata
 from decimal import Decimal, InvalidOperation
 
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
@@ -22,10 +23,15 @@ REL_TOL = Decimal("0.005")
 ABS_TOL = Decimal("0.01")
 
 _INJECTION = re.compile(
-    r"ignore (all|any|previous|prior|the above)|disregard .*instruction|system prompt|"
-    r"you are now|developer mode|\bjailbreak\b|transfer (all|everything)|send (all|everything)|"
+    r"ignore (all|any|previous|prior|the above)|disregard .*(instruction|rule|approval|limit|check)|"
+    r"you are now|developer mode|\bjailbreak\b|\bdan mode\b|pretend (you are|to be|you're)|"
+    r"transfer (all|everything)|send (all|everything)|"
     r"new instruction|act as|override|ignore (your|the|these|my) (rules|instructions|limits)|"
+    r"forget (your|the|all|any|previous|prior) (rules|instructions|limits|training)|"
     r"without (the )?(family )?(approval|confirmation)|skip (the )?(family|approval|confirmation|check)|"
+    r"(do not|don'?t|never) (tell|inform|ask|notify|alert|involve) (the |my |your )?(family|parents?|mother|father|guardian)|"
+    r"without (telling|asking|informing|notifying) (the |my |your )?(family|parents?|mother|father|guardian)|"
+    r"(decode|base64|rot13)\b.{0,30}\b(and )?(follow|execute|run|obey|do)|"
     r"\bbypass\b|pre-?approved|note to (the )?assistant|"
     # Banglish and Bangla versions of the same tricks
     r"(approval|onumodon|confirm|check)\s+(chara|charai|lagbe na|ni(y|)e)|"
@@ -37,6 +43,35 @@ _INJECTION = re.compile(
     re.IGNORECASE,
 )
 
+# "Mum already approved it": approval can only be given on the family's own screen, so for a money request this
+# claim is treated like the instruction wording above. It is not applied to questions and other information requests.
+_CLAIMED_APPROVAL = re.compile(
+    r"\b(family|mother|father|parents?|mom|mum|dad|guardian|bank|admin|manager|university|officer)( \w+){0,2} "
+    r"(already )?(approved|said (it is|it's) (ok|okay|fine)|agreed|allowed|authori[sz]ed|cleared)( it| this| that)?"
+    r"( on the phone| by phone| verbally)?|\bpre-?cleared\b",
+    re.IGNORECASE,
+)
+
+_ZERO_WIDTH = re.compile("[\u200b-\u200f\u202a-\u202e\u2060\ufeff\u00ad]")
+_SPACED = re.compile(r"\b(?:[a-z][ .\-_*]){3,}[a-z]\b")
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "i"})
+_LEET_WORD = re.compile(r"(?<![\d-])\b(?=[a-z0-9@$!]*[a-z])(?=[a-z0-9@$!]*[01345 7@$!])[a-z0-9@$!]{4,}\b")
+
+
+def deobfuscate(text: str) -> str:
+    """Lower-cased text with the usual disguises undone, for detection only (never shown, never acted on):
+    full-width and look-alike letters (NFKC), zero-width characters, spaced-out letters ("i g n o r e") and
+    leetspeak inside words ("ign0re"). Digits that stand alone (invoice ids, amounts) are left alone."""
+    t = _ZERO_WIDTH.sub("", unicodedata.normalize("NFKC", text or "")).lower()
+    t = _SPACED.sub(lambda m: re.sub(r"[ .\-_*]", "", m.group()), t)
+
+    def leet(m):
+        w = m.group()
+        out = w.translate(_LEET)
+        return out if out.isalpha() and sum(c.isalpha() for c in w) >= len(w) // 2 else w
+    return _LEET_WORD.sub(leet, t)
+
+
 # Pressure wording typical of consultancy scams. It never changes a decision;
 # it is shown to the student and the family as a warning.
 _PRESSURE = re.compile(
@@ -47,7 +82,14 @@ _PRESSURE = re.compile(
 
 
 def looks_like_injection(text: str) -> bool:
-    return bool(text) and bool(_INJECTION.search(text))
+    """True for instruction-override, approval-skipping, secrecy-from-the-family and "send everything" wording,
+    also when it is disguised (spaced letters, leetspeak, full-width letters, zero-width characters)."""
+    return bool(text) and bool(_INJECTION.search(text) or _INJECTION.search(deobfuscate(text)))
+
+
+def claims_approval(text: str) -> bool:
+    """A claim that someone has already approved the payment (only meaningful for a money request)."""
+    return bool(text) and bool(_CLAIMED_APPROVAL.search(text) or _CLAIMED_APPROVAL.search(deobfuscate(text)))
 
 
 def flag_spans(text: str) -> list:
@@ -55,6 +97,7 @@ def flag_spans(text: str) -> list:
     View data for the invoice X-ray: it marks what the detectors already found and decides nothing."""
     spans = [(m.start(), m.end(), "pressure") for m in _PRESSURE.finditer(text or "")]
     spans += [(m.start(), m.end(), "injection") for m in _INJECTION.finditer(text or "")]
+    spans += [(m.start(), m.end(), "injection") for m in _CLAIMED_APPROVAL.finditer(text or "")]
     spans.sort()
     out, last = [], 0
     for a, b, kind in spans:

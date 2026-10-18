@@ -20,7 +20,7 @@ from .reasons import PaymentBlocked
 from .security.audit import mask_account
 from . import xray
 
-DOC_ID = re.compile(r"\b(?:INV|RENT|Q)-[A-Z0-9]+(?:-[A-Z0-9]+)*\b", re.IGNORECASE)
+DOC_ID = re.compile(r"\b(?:INV|RENT|Q|LAB)-[A-Z0-9]+(?:-[A-Z0-9]+)*\b", re.IGNORECASE)
 
 
 def _iso(ts: float) -> str:
@@ -36,6 +36,7 @@ class PaymentBook:
         self.payees = payees if payees is not None else {p["id"]: dict(p) for p in profile.get("payees", [])}
         self.invoices = {i["id"].upper(): dict(i) for i in profile.get("invoices", [])}
         self.documents = {k: dict(v) for k, v in profile.get("documents", {}).items()}
+        self.owner = dict(profile.get("owner", {}))
         fam = profile.get("family", {})
         self.family_name = fam.get("name", "Family")
         self.family_limit = D(fam.get("daily_limit_cny", PAYMENT["family_limit_default_cny"]))
@@ -207,8 +208,9 @@ class PaymentBook:
                      f"{payee['name']}'s verified account is {mask_account(payee.get('account_number', ''))}.")
             if inv.get("kind") == "tuition" and payee["type"] != "institution":
                 fail("PAYEE_NOT_VERIFIED", "Verified account",
-                     f"Tuition can only go to the university's verified account. {payee['name']} is a "
-                     f"'{payee['type']}' payee, and agents are blocked for tuition.")
+                     f"Tuition can only go to the university, or to a payment company the university names in the "
+                     f"admission letter (Bangladesh Bank FEPD-1 Circular No. 40, para 10). {payee['name']} is a "
+                     f"'{payee['type']}' payee, so this tuition bill is blocked.")
             ok("Verified account", f"{mask_account(acct)} matches the saved, verified account")
 
             missing = [d for d in inv.get("required_docs", []) if not self.documents.get(d, {}).get("ready")]
@@ -568,6 +570,18 @@ class PaymentBook:
         owner_name = owner["name"] if owner and owner is not payee else None
         return xray.build(inv, payee, owner_name, code)
 
+    def _doc(self, inv: dict) -> dict:
+        """View data for the invoice as printed: issuer, bill-to, lines and bank. Account numbers stay masked
+        (the X-ray carries the positions). The bank shown is the one that owns the account on the bill."""
+        payee = self.payees[inv["payee_id"]]
+        owner = self._owner_of(inv.get("account_number")) or payee
+        return {"issuer": inv.get("issuer") or payee["name"], "address": payee.get("address"),
+                "bill_to": self.owner.get("display_name"), "student_id": self.owner.get("student_id"),
+                "school": self.owner.get("university"), "issued": inv.get("issued"),
+                "lines": [{"item": l["item"], "amount": q(l["amount"])} for l in inv.get("lines", [])]
+                or [{"item": inv["purpose"], "amount": q(inv["amount"])}],
+                "bank_name": inv.get("bank_name") or owner.get("bank_name")}
+
     def snapshot(self) -> dict:
         self.expire()
         now = self.clock.ts()
@@ -603,7 +617,7 @@ class PaymentBook:
                           "due": i.get("due"), "status": i["status"],
                           "account": mask_account(i["account_number"]) if i.get("account_number") else None,
                           "account_ok": i.get("account_number") == self.payees[i["payee_id"]].get("account_number"),
-                          "xray": self._xray(i)}
+                          "lab": bool(i.get("lab")), "xray": self._xray(i), "doc": self._doc(i)}
                          for i in self.invoices.values()],
             "documents": [{"key": k, **v} for k, v in self.documents.items()],
             "requests": [{**{k: v for k, v in r.items() if not k.endswith("_ts")}, "seconds_left": req_left(r)}
