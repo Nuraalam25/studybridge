@@ -115,6 +115,14 @@
           <div id="quick" class="quick"></div>
           <div id="more-quick" class="more-quick" hidden></div>
         </div>
+        <div class="card-flat scam-card">
+          <h4>Got a message about paying?</h4>
+          <p class="muted small">Paste it and see which parts look like a scam. The text stays on this screen and is never sent to Qwen.</p>
+          <div class="row">
+            <button type="button" id="open-scamcheck" class="btn primary small">Check a message</button>
+            <button type="button" id="open-quiz" class="btn small">Spot the scam</button>
+          </div>
+        </div>
         <div id="mine" class="mine" aria-label="My allowances"></div>
         <div class="card-flat">
           <h4>Recent activity</h4>
@@ -223,6 +231,29 @@
           <div class="bar"><div id="fam-meter" class="bar-fill family-fill"></div></div>
           <div id="fam-spent" class="small muted"></div>
         </div>
+        <div class="group" id="safe-group">
+          <h4>Family safe word</h4>
+          <p class="small muted">Agree a word with your student in person or on a call you start. If anyone phones or messages asking you to approve something urgent, ask them for the word first. Approving a large payment, a changed bank account or a request with warnings then needs it. The app cannot tell who is calling, so you are the check.</p>
+          <div id="safe-state" class="small"></div>
+          <form id="safe-form" class="stack-form" autocomplete="off">
+            <label id="safe-current-row" hidden>Current safe word <input id="safe-current" type="password" maxlength="40" autocomplete="off"></label>
+            <label>New safe word <input id="safe-new" type="password" maxlength="40" autocomplete="off" placeholder="4 to 40 characters"></label>
+            <div class="row"><button type="submit" class="btn small primary">Save safe word</button>
+              <button type="button" id="safe-remove" class="btn small" hidden>Remove it</button></div>
+          </form>
+        </div>
+        <div class="group" id="payee-group">
+          <h4>Save a new payee</h4>
+          <p class="small muted">A payee you save now can be paid only after <span id="payee-hold">48</span> hours. The wait gives you time to notice a mistake or a scam.</p>
+          <form id="payee-form" class="stack-form" autocomplete="off">
+            <label>Name <input id="payee-name" maxlength="60" required placeholder="e.g. Green Flat Landlord"></label>
+            <label>Type <select id="payee-type"><option value="landlord">Landlord</option><option value="merchant">Shop</option><option value="institution">University or school</option><option value="person_or_agent">Person or agent</option></select></label>
+            <label>Account number <input id="payee-account" inputmode="numeric" maxlength="30" required placeholder="6 to 24 digits"></label>
+            <label class="check"><input id="payee-confirmed" type="checkbox"> I checked these details with the payee myself (by phone or in person), not from a message or a bill</label>
+            <button type="submit" class="btn small primary">Save payee</button>
+          </form>
+          <ul id="payee-waits" class="list small"></ul>
+        </div>
         <div class="group">
           <h4 data-i18n="docs">Documents</h4>
           <ul id="docs" class="list"></ul>
@@ -262,6 +293,37 @@
     <div id="story-list" class="story-list"></div>
   </dialog>
 
+  <dialog id="scamcheck" aria-label="Scam check">
+    <div class="dlg-head">
+      <div>
+        <h2>Scam check</h2>
+        <p class="muted">Paste a message you were sent, or test yourself. Nothing here can start a payment.</p>
+      </div>
+      <button type="button" id="scamcheck-close" class="btn" aria-label="Close">Close</button>
+    </div>
+    <div class="ctabs" role="tablist">
+      <button type="button" role="tab" class="on" data-sctab="check">Check a message</button>
+      <button type="button" role="tab" data-sctab="quiz">Spot the scam</button>
+    </div>
+
+    <div class="ctab on" data-scpane="check">
+      <form id="sc-form" class="sc-form">
+        <textarea id="sc-text" rows="5" maxlength="2000" placeholder="Paste the message here (WhatsApp, WeChat, email, SMS)" aria-label="Message to check"></textarea>
+        <div class="row">
+          <button type="submit" class="btn primary">Check it</button>
+          <button type="button" id="sc-example" class="btn">Try an example</button>
+          <span class="small muted" id="sc-count">0 / 2000</span>
+        </div>
+      </form>
+      <div id="sc-result" class="sc-result" aria-live="polite"></div>
+    </div>
+
+    <div class="ctab" data-scpane="quiz" hidden>
+      <div id="quiz-box" class="quiz-box" aria-live="polite"></div>
+    </div>
+    <p class="small muted">The checker looks for wording that public scam reports describe. It cannot prove a message is genuine, so it never says "safe".</p>
+  </dialog>
+
   <dialog id="challenge" aria-label="Try to scam StudyBridge">
     <div class="dlg-head">
       <div>
@@ -285,6 +347,10 @@
         <div class="s-moved"><b id="sc-moved">0</b><span>money moved without both</span></div>
       </div>
       <div id="owasp-tally" class="owasp-tally"></div>
+      <div class="row report-row">
+        <button type="button" id="report-save" class="btn small" disabled>Save report (.md)</button>
+        <span class="small muted">A plain-text record of this session's attempts. Interactive results are not demo evidence.</span>
+      </div>
       <div id="attacks" class="attack-groups"></div>
       <form id="attack-form" class="attack-form">
         <input id="attack-msg" autocomplete="off" maxlength="300" placeholder="Or write your own attack, in any words" aria-label="Your own attack">

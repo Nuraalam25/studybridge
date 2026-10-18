@@ -143,7 +143,7 @@ function onResponse(actor, action, args, r) {
     else if (r.code === "ACCOUNT_CHANGE_APPROVED") addSys("The family checked the new account by phone. It can be paid after the 24-hour wait.");
     else if (r.code === "ALLOWANCE_APPROVED") addSys(`The family approved allowance ${r.allowance_id}. Pay when you are at the shop.`, r.suggestion);
     else if (r.code === "REJECTED_BY_FAMILY") addSys("The family rejected the request. Nothing moved.");
-    else if (r.blocked) addSys(`Family action refused: ${human(r.code)}`);
+    else if (r.blocked && !String(r.code).startsWith("SAFE_WORD")) addSys(`Family action refused: ${human(r.code)}`);
   } else toast(r.blocked ? `${human(r.code)}: ${r.fix}` : r.text);
 }
 
@@ -672,13 +672,17 @@ function renderFamily() {
   document.querySelectorAll("[data-i18n]").forEach((n) => { n.textContent = t(n.dataset.i18n); });
   $("lang").textContent = t("lang");
   const inbox = $("inbox");
-  inbox.replaceChildren();
   const pending = b.requests.filter((r) => r.status === "pending");
   $("inbox-count").textContent = pending.length ? String(pending.length) : "";
-  if (!pending.length) inbox.append(el("div", t("empty"), "empty"));
-  for (const r of pending.slice().reverse()) inbox.append(requestCard(r));
+  const typing = document.activeElement && inbox.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+  if (!typing) {                                  // never rebuild the inbox under a field the family is typing in
+    inbox.replaceChildren();
+    if (!pending.length) inbox.append(el("div", t("empty"), "empty"));
+    for (const r of pending.slice().reverse()) inbox.append(requestCard(r));
+  }
   renderAlerts();
   renderBills("fam-bills", false);
+  renderSafeAndPayees();
 
   const base = Number(b.family_limit), lim = Number(b.family_limit_today);
   if (document.activeElement !== $("limit")) $("limit").value = base;
@@ -776,6 +780,8 @@ function warningText(w) {
   return m ? `${m[1]} ${t("injectionNote")}` : w;
 }
 
+const safeDraft = {}, safeMsg = {};
+
 function requestCard(r) {
   const card = el("div", undefined, "req" + (seenRequests.has(r.id) ? "" : " new"));
   seenRequests.add(r.id);
@@ -829,6 +835,19 @@ function requestCard(r) {
     sel.onchange = () => { extra[r.monthly ? "months" : "hours"] = Number(sel.value); };
     row.append(sel);
   }
+  let safe = null;
+  if (r.needs_safe_word) {
+    const box = el("div", undefined, "safe-box");
+    box.append(el("strong", "Safe word needed"), el("div", `Because of ${r.needs_safe_word}. Ask whoever is asking for this money for the family's safe word, on a call you start yourself. If they cannot say it, reject.`, "small"));
+    safe = el("input");
+    safe.type = "password"; safe.autocomplete = "off"; safe.maxLength = 40; safe.placeholder = "Safe word";
+    safe.setAttribute("aria-label", "Family safe word");
+    safe.value = safeDraft[r.id] || "";
+    safe.oninput = () => { safeDraft[r.id] = safe.value; };
+    box.append(safe);
+    if (safeMsg[r.id]) box.append(el("div", safeMsg[r.id], "small bad"));
+    card.append(box);
+  }
   let called = null;
   if (r.kind === "account_change") {
     const lab = el("label", undefined, "check");
@@ -839,13 +858,51 @@ function requestCard(r) {
   }
   const ok = el("button", t("approve"), "approve");
   ok.type = "button";
-  ok.onclick = () => act("family", "decide", { request_id: r.id, approve: true, ...extra, phone_verified: called ? called.checked : false });
+  ok.onclick = async () => {
+    const res = await act("family", "decide", { request_id: r.id, approve: true, ...extra, phone_verified: called ? called.checked : false,
+      safe_word: safe ? safe.value : undefined });
+    if (String(res.code).startsWith("SAFE_WORD")) {
+      safeMsg[r.id] = (res.text.split("\n").find((l) => l.startsWith("Why: ")) || "").slice(5) || human(res.code);
+      renderFamily();
+    } else { delete safeDraft[r.id]; delete safeMsg[r.id]; }
+  };
   const no = el("button", t("reject"), "reject");
   no.type = "button";
   no.onclick = () => act("family", "decide", { request_id: r.id, approve: false });
   row.append(ok, no);
   card.append(row);
   return card;
+}
+
+// ------------------------------------------------------------------ family safe word and saving a new payee
+function renderSafeAndPayees() {
+  const sw = state.book.safe_word;
+  $("safe-state").textContent = sw.locked_seconds_left ? `A safe word is set. Approving is locked for ${dur(sw.locked_seconds_left)} after wrong tries.`
+    : sw.set ? `A safe word is set. It is asked for at CNY ${num(sw.from_cny, 0)} or more, a changed bank account, or a request with warnings.`
+    : "No safe word yet.";
+  $("safe-current-row").hidden = !sw.set;
+  $("safe-remove").hidden = !sw.set;
+  $("payee-hold").textContent = state.book.new_payee_hold_hours;
+  const ul = $("payee-waits");
+  ul.replaceChildren();
+  for (const p of state.book.payees.filter((x) => x.saved_on)) {
+    ul.append(el("li", p.cooling_seconds_left ? `${p.name}: can be paid in ${dur(p.cooling_seconds_left)}` : `${p.name}: can be paid now`));
+  }
+}
+
+async function saveSafeWord(e, remove) {
+  if (e) e.preventDefault();
+  const res = await act("family", "set_safe_word", { word: remove ? "" : $("safe-new").value, current: $("safe-current").value });
+  if (!res.blocked) { $("safe-new").value = ""; $("safe-current").value = ""; }
+  else toast(`${human(res.code)}: ${(res.text.split("\n").find((l) => l.startsWith("Why: ")) || "").slice(5)}`);
+}
+
+async function savePayee(e) {
+  e.preventDefault();
+  const res = await act("family", "add_payee", { name: $("payee-name").value, type: $("payee-type").value,
+    account: $("payee-account").value, confirmed: $("payee-confirmed").checked });
+  if (!res.blocked) { $("payee-name").value = ""; $("payee-account").value = ""; $("payee-confirmed").checked = false; }
+  else toast(`${human(res.code)}: ${(res.text.split("\n").find((l) => l.startsWith("Why: ")) || "").slice(5)}`);
 }
 
 // ------------------------------------------------------------------ ask to raise the limit
@@ -1312,7 +1369,8 @@ function renderCaseThreat(c) {
 // Every attack is a normal student chat message sent through act(): no special route, nothing bypassed.
 const score = { attempts: 0, stopped: 0, waiting: 0, answered: 0, moved: 0, owasp: {} };
 const FAMILY_WAIT = ["AWAITING_FAMILY", "ALLOWANCE_REQUESTED", "READY_TO_CONFIRM"];
-let attacks = [], attackGroups = [];
+let attacks = [], attackGroups = [], appVersion = "";
+const report = { attempts: [], batch: null };
 
 function renderScore() {
   $("sc-attempts").textContent = score.attempts;
@@ -1363,6 +1421,9 @@ async function attack(message, title, burst = 1) {
   if (r.threat && r.threat.owasp && r.threat.level !== "note") score.owasp[r.threat.owasp] = (score.owasp[r.threat.owasp] || 0) + 1;
   if (state.payments.length > before) score.moved += state.payments.length - before;   // chat can never do this
   renderScore();
+  report.attempts.push({ title: title || "(free text)", message: text, burst, code: r.code, kind,
+    threat: r.threat ? `${r.threat.label}${r.threat.owasp ? " (OWASP " + r.threat.owasp + ")" : ""}` : "", qwen: r.parse_source });
+  $("report-save").disabled = false;
   const why = (r.text.split("\n").find((l) => l.startsWith("Why: ")) || "").replace(/^Why: /, "");
   const li = el("li", undefined, "attempt" + (r.threat && r.threat.level === "danger" ? " hot" : ""));
   const head = el("div", undefined, "a-head");
@@ -1395,17 +1456,27 @@ function renderAttacks() {
     const list = attacks.filter((a) => a.group === g.id);
     if (!list.length) continue;
     const sec = el("details", undefined, "agroup");
-    sec.open = g.id === "fraud" || g.id === "injection";
+    sec.open = g.id === "fraud" || g.id === "cases" || g.id === "injection";
     const sum = el("summary");
     sum.append(el("span", g.title), el("span", g.owasp ? `OWASP ${g.owasp}` : "no model involved", "owasp"), el("span", String(list.length), "gcount"));
     sec.append(sum);
     const grid = el("div", undefined, "attacks");
     for (const a of list) {
+      const cell = el("div", undefined, "attack-cell");
       const b = el("button", undefined, "attack");
       b.type = "button";
       b.append(el("strong", a.title), el("span", a.says));
       b.onclick = () => attack(a.message, a.title, a.burst || 1);
-      grid.append(b);
+      cell.append(b);
+      if (a.source) {                                   // the public report this pattern comes from
+        const link = el("a", `Source: ${a.source.title}`, "attack-source");
+        link.href = a.source.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.title = a.source.what;
+        cell.append(link);
+      }
+      grid.append(cell);
     }
     sec.append(grid);
     box.append(sec);
@@ -1422,12 +1493,210 @@ async function openChallenge() {
     const res = await api("/api/attacks");
     attacks = res.attacks;
     attackGroups = res.groups;
+    appVersion = res.version || "";
     renderAttacks();
   }
   renderChallengeTier();
   renderScore();
   renderLabPayees();
   $("challenge").showModal();
+}
+
+// ------------------------------------------------------------------ scam check and quiz
+// Text only. These go straight to /api/act (not through the chat thread) and cannot start a payment.
+const SC_EXAMPLES = [
+  "Dear student, our university bank account has changed. Please pay the tuition to the new account 6222020200998877661 today or your seat will be cancelled. Do not tell your family, they will not understand.",
+  "Hi Ayesha, I help students pay fees cheaper. Send me 95% of your tuition and I will pay the university with my company card. Only this week!",
+  "Your tuition invoice INV-0003 is due on 30 November. Please pay from the payment page you reach by typing the university's address yourself.",
+];
+let scExample = 0;
+
+function highlight(text, spans) {
+  const frag = document.createDocumentFragment();
+  let at = 0;
+  for (const s of spans || []) {
+    if (s.start < at || s.end > text.length) continue;
+    if (s.start > at) frag.append(document.createTextNode(text.slice(at, s.start)));
+    frag.append(el("mark", text.slice(s.start, s.end), "mk mk-" + s.kind));
+    at = s.end;
+  }
+  if (at < text.length) frag.append(document.createTextNode(text.slice(at)));
+  return frag;
+}
+
+function sourceLink(c) {
+  const wrap = el("div", undefined, "sc-case");
+  wrap.append(el("strong", "Looks like a reported case: " + c.title), el("p", c.what, "small"));
+  const a = el("a", "Source: " + c.source_title, "attack-source");
+  a.href = c.source_url; a.target = "_blank"; a.rel = "noopener noreferrer";
+  wrap.append(a);
+  return wrap;
+}
+
+function signalList(signals) {
+  const ul = el("ul", undefined, "sc-signals");
+  for (const s of signals) {
+    const li = el("li", undefined, "sev" + s.severity);
+    li.append(el("strong", s.label), el("span", " " + s.why, "small muted"));
+    ul.append(li);
+  }
+  return ul;
+}
+
+function renderScamResult(text, d) {
+  const box = $("sc-result");
+  box.replaceChildren();
+  const head = el("div", undefined, "sc-verdict lvl-" + d.level);
+  head.append(el("b", d.verdict));
+  box.append(head);
+  const quote = el("div", undefined, "sc-quote");
+  quote.append(highlight(text.slice(0, d.length), d.spans));
+  box.append(quote);
+  if (d.signals.length) box.append(el("h4", "What looks wrong"), signalList(d.signals));
+  if (d.accounts.length) {
+    const h = el("h4", "Account numbers in the message");
+    const ul = el("ul", undefined, "sc-signals");
+    for (const a of d.accounts) {
+      const li = el("li");
+      li.append(el("strong", `Account ending ${a.last4}: `),
+        document.createTextNode(a.saved ? `this is the account the family saved for ${a.payee}. A message still cannot make it a payee for another bill.`
+                                         : "the family has not saved this account, so StudyBridge would never pay it."));
+      ul.append(li);
+    }
+    box.append(h, ul);
+  }
+  if (d.case) box.append(sourceLink(d.case));
+  box.append(el("h4", "What to do"));
+  const ol = el("ol", undefined, "sc-next");
+  for (const n of d.next) ol.append(el("li", n));
+  box.append(ol);
+  const q = el("p", undefined, "small muted sc-qwen");
+  q.append(el("b", "Qwen: "), document.createTextNode(d.qwen.note));
+  if (d.qwen.text) q.append(el("span", " “" + d.qwen.text + "”"));
+  box.append(q);
+}
+
+async function scamCheck(e) {
+  e.preventDefault();
+  const text = $("sc-text").value;
+  if (!text.trim()) { toast("Paste a message first."); return; }
+  const res = await api("/api/act", { actor: "student", action: "check_message", args: { text } });
+  const r = res.response;
+  if (r.blocked) { $("sc-result").replaceChildren(el("p", `${human(r.code)}: ${r.fix}`)); return; }
+  renderScamResult(text, r.data);
+}
+
+function showScamTab(name) {
+  document.querySelectorAll("#scamcheck .ctabs button").forEach((b) => b.classList.toggle("on", b.dataset.sctab === name));
+  document.querySelectorAll("#scamcheck .ctab").forEach((p) => { p.hidden = p.dataset.scpane !== name; p.classList.toggle("on", p.dataset.scpane === name); });
+  if (name === "quiz" && !quiz.items.length) quizStart();
+}
+
+const quiz = { items: [], at: 0, right: 0, answered: false };
+
+async function quizStart() {
+  const res = await api("/api/act", { actor: "student", action: "scam_quiz", args: {} });
+  quiz.items = res.response.data.items || [];
+  quiz.at = 0; quiz.right = 0; quiz.answered = false;
+  renderQuiz();
+}
+
+function renderQuiz(reveal) {
+  const box = $("quiz-box");
+  box.replaceChildren();
+  if (!quiz.items.length) return;
+  if (quiz.at >= quiz.items.length) {
+    box.append(el("h3", `You got ${quiz.right} of ${quiz.items.length} right.`),
+      el("p", "A real message can still look strange, and a scam can look polite. When a message asks for money, check with the university using contact details from its own website.", "muted"));
+    const again = el("button", "Play again", "btn primary");
+    again.type = "button"; again.onclick = quizStart;
+    box.append(again);
+    return;
+  }
+  const item = quiz.items[quiz.at];
+  box.append(el("p", `Message ${quiz.at + 1} of ${quiz.items.length}`, "small muted"));
+  const quote = el("div", undefined, "sc-quote");
+  if (reveal) quote.append(highlight(reveal.text, reveal.spans)); else quote.textContent = item.text;
+  box.append(quote);
+  if (!reveal) {
+    const row = el("div", undefined, "row");
+    for (const [label, says] of [["It is a scam", true], ["It looks genuine", false]]) {
+      const b = el("button", label, "btn" + (says ? " danger" : ""));
+      b.type = "button";
+      b.onclick = () => quizAnswer(item.id, says);
+      row.append(b);
+    }
+    box.append(row);
+    return;
+  }
+  const verdict = el("div", undefined, "sc-verdict lvl-" + (reveal.right ? "ok" : "danger"));
+  verdict.append(el("b", reveal.right ? "Right." : "Not quite."),
+    document.createTextNode(reveal.scam ? " This one was a scam." : " This one was genuine."));
+  box.append(verdict);
+  if (reveal.signals.length) box.append(el("h4", "What gave it away"), signalList(reveal.signals));
+  else box.append(el("p", "No warning words. It tells you to use the university's own channels and asks for nothing.", "small muted"));
+  if (reveal.case) box.append(sourceLink(reveal.case));
+  const next = el("button", quiz.at + 1 >= quiz.items.length ? "See my score" : "Next message", "btn primary");
+  next.type = "button";
+  next.onclick = () => { quiz.at += 1; renderQuiz(); };
+  box.append(next);
+}
+
+async function quizAnswer(id, says) {
+  const res = await api("/api/act", { actor: "student", action: "scam_quiz", args: { id, says_scam: says } });
+  const r = res.response;
+  if (r.blocked) { toast(`${human(r.code)}: ${r.fix}`); return; }
+  if (r.data.right) quiz.right += 1;
+  renderQuiz(r.data);
+}
+
+function openScamCheck(tab) {
+  showScamTab(tab);
+  $("scamcheck").showModal();
+}
+
+// ------------------------------------------------------------------ red-team report (plain text, from this session)
+const mdCell = (s) => String(s || "").replace(/\s+/g, " ").replace(/\|/g, "\\|").slice(0, 160);
+
+function buildReport() {
+  const now = new Date();
+  const kinds = { stopped: 0, waiting: 0, answered: 0 };
+  report.attempts.forEach((a) => { kinds[a.kind] += 1; });
+  const lines = [
+    "# StudyBridge red-team report (this session)", "",
+    `Made: ${now.toISOString()} · Sandbox clock: ${state.clock.replace("T", " ")} · App version: ${appVersion || "?"} · ` +
+      `Qwen: ${state.llm ? "on (" + state.llm + ")" : "off (rules only)"} · Permission: ${tierName(state.tier)}`, "",
+    "> This is a record of what was tried on screen in one session. It is **not** execution evidence: only logs made by " +
+      "`python -m studybridge demo` after the freeze may be quoted on slides.", "",
+    "## Score", "",
+    `- Attempts: ${report.attempts.length}`, `- Stopped: ${kinds.stopped}`,
+    `- Waiting for the family or the student: ${kinds.waiting}`, `- Answered like a normal request: ${kinds.answered}`,
+    `- Money moved without both the family and the student: ${score.moved}`, "",
+    "## Caught as (OWASP Top 10 for LLM Applications, 2025)", "",
+  ];
+  const ids = Object.keys(score.owasp).sort();
+  if (ids.length) ids.forEach((id) => lines.push(`- ${id}: ${score.owasp[id]}`)); else lines.push("- none");
+  lines.push("", "## Attempts", "", "| # | Attack | Message sent | Result | Caught as |", "|---|---|---|---|---|");
+  report.attempts.forEach((a, i) => lines.push(
+    `| ${i + 1} | ${mdCell(a.title)}${a.burst > 1 ? " ×" + a.burst : ""} | ${mdCell(a.message)} | ${human(a.code)} (${a.kind}) | ${mdCell(a.threat) || "no wording; a payment rule or a normal answer"} |`));
+  lines.push("", "## Random bill check", "");
+  if (report.batch) {
+    lines.push(`${report.batch.ok} of ${report.batch.count} random bills got the answer the plan requires (seeds ${report.batch.seed} to ${report.batch.seed + report.batch.count - 1}).`);
+    report.batch.wrong.forEach((w) => lines.push(`- Not as required: ${w}`));
+  } else lines.push("Not run in this session.");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function saveReport() {
+  const blob = new Blob([buildReport()], { type: "text/markdown;charset=utf-8" });
+  const a = el("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `studybridge-redteam-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.md`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
 // ------------------------------------------------------------------ invoice lab
@@ -1531,6 +1800,8 @@ async function labBatch() {
     for (const w of d.wrong) card.append(el("div", `seed ${w.seed} · ${w.title}: plan says ${human(w.expected)}, got ${human(w.code)}`, "lab-error"));
   }
   card.append(el("p", `Seeds ${d.seed} to ${d.seed + d.count - 1}. Run it again for different bills.`, "small muted"));
+  report.batch = { count: d.count, ok: d.as_expected, seed: d.seed, wrong: d.wrong.map((w) => `seed ${w.seed} · ${w.title}: plan says ${human(w.expected)}, got ${human(w.code)}`) };
+  $("report-save").disabled = false;
   box.append(card);
 }
 
@@ -1700,6 +1971,17 @@ function wire() {
   $("steps-toggle").onclick = () => { showAllSteps = !showAllSteps; renderGlass(); };
   $("tour-play").onclick = () => { $("stories").close(); startTour(); };
   $("open-challenge").onclick = openChallenge;
+  $("safe-form").addEventListener("submit", (e) => saveSafeWord(e, false));
+  $("safe-remove").onclick = () => saveSafeWord(null, true);
+  $("payee-form").addEventListener("submit", savePayee);
+  $("report-save").onclick = saveReport;
+  $("open-scamcheck").onclick = () => openScamCheck("check");
+  $("open-quiz").onclick = () => openScamCheck("quiz");
+  $("scamcheck-close").onclick = () => $("scamcheck").close();
+  document.querySelectorAll("#scamcheck .ctabs button").forEach((b) => { b.onclick = () => showScamTab(b.dataset.sctab); });
+  $("sc-form").addEventListener("submit", scamCheck);
+  $("sc-example").onclick = () => { $("sc-text").value = SC_EXAMPLES[scExample++ % SC_EXAMPLES.length]; $("sc-count").textContent = `${$("sc-text").value.length} / 2000`; };
+  $("sc-text").addEventListener("input", () => { $("sc-count").textContent = `${$("sc-text").value.length} / 2000`; });
   document.querySelectorAll("#challenge .ctabs button").forEach((b) => { b.onclick = () => showChallengeTab(b.dataset.ctab); });
   $("lab-form").addEventListener("submit", labMake);
   $("lab-random").onclick = labRandom;

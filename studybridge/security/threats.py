@@ -39,7 +39,7 @@ _PROMPT_LEAK = re.compile(
 
 # LLM02: secrets and personal or internal data.
 _SECRET_WORDS = (r"(?:password|passcode|passphrase|\bpin\b|\botp\b|\bcvv\b|\bcvc\b|api[ _-]?key|secret(?: key)?|private key|"
-                 r"\btoken\b|credentials?|ssh key|পাসওয়ার্ড|পিন)")
+                 r"\btoken\b|credentials?|ssh key|(?:safe|code|secret|magic) ?word|পাসওয়ার্ড|পিন)")
 _SECRET_DATA = re.compile(
     r"\b" + _ASK + r"\b.{0,40}" + _SECRET_WORDS + "|" +
     r"\b(?:full|complete|entire|whole|unmasked|real|actual|raw|every)\b.{0,20}\b(?:account|card|bank|iban|swift)\b|"

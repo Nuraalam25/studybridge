@@ -154,7 +154,11 @@ class Sandbox:
         if action == "decide":
             return a.family_decide(str(args.get("request_id", "")), bool(args.get("approve")), actor=actor,
                                    hours=args.get("hours"), phone_verified=args.get("phone_verified") is True,
-                                   months=args.get("months"))
+                                   months=args.get("months"), safe_word=args.get("safe_word"))
+        if action == "set_safe_word":
+            return a.family_set_safe_word(args.get("word"), args.get("current"), actor=actor)
+        if action == "add_payee":
+            return a.family_add_payee(args, actor=actor)
         if action == "set_limit":
             return a.family_set_limit(args.get("cny", 0), actor=actor)
         if action == "set_doc":
@@ -165,6 +169,12 @@ class Sandbox:
             return a.ack_alert(str(args.get("id", "")), actor=actor)
         if action == "ask_cancel":
             return a.ask_cancel(str(args.get("id", "")), actor=actor)
+        if action == "check_message":
+            return a.check_message(str(args.get("text", ""))[:3000], actor=actor)
+        if action == "scam_quiz":
+            if args.get("id"):
+                return a.scam_quiz_answer(str(args.get("id")), args.get("says_scam"), actor=actor)
+            return a.scam_quiz(actor=actor)
         if action == "check_random_bills":
             if not actor_allowed(actor, action):
                 return a._actor_refused(actor, action)

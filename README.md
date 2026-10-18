@@ -44,7 +44,7 @@ Requires Python 3.10+. There are **no third-party dependencies**; only the stand
 
 ```bash
 git clone https://github.com/MehazabinLamiha/StudyBridge.git && cd StudyBridge
-python -m unittest discover -s tests -t .                      # 218 tests
+python -m unittest discover -s tests -t .                      # 245 tests
 python -m studybridge --today 2026-10-13 --tier TRANSACT web    # http://127.0.0.1:8765
 python -m studybridge --today 2026-10-13 demo                   # the 31 stories -> evidence/
 python -m studybridge stories                                   # list the 31 stories
@@ -84,14 +84,25 @@ New in v0.4 (18 October):
   Qwen) read each message, whether Qwen was asked, and what it was sent. With Qwen on, a money request that only
   Qwen reads (the rules reader finds no payment) is offered back to the student as a question written by code,
   never run on Qwen's say-so. Attacks are stopped *before* Qwen and the Glass Box says so.
-- **Try to scam StudyBridge** now has 32 ready-made attacks in six groups, labelled with the OWASP Top 10 for LLM
-  Applications (2025): payment scams, prompt injection (spaced letters, leetspeak, Banglish, base64, role-play,
+- **Try to scam StudyBridge** now has 35 ready-made attacks in seven groups, labelled with the OWASP Top 10 for LLM
+  Applications (2025) where one applies: payment scams, five patterns copied from public reports (each links to its
+  source page), prompt injection (spaced letters, leetspeak, Banglish, base64, role-play,
   a hidden instruction in a bill), secret and system-prompt requests, excessive agency (claiming to be the family
   or admin), markup, and floods. Free text is recognised and named. When an attack is caught the whole screen
   turns dark red with a banner naming the threat; it clears by itself after a few seconds.
 - **Invoice lab** (second tab of the same panel): build any bill (payee, amount, issuer name, account, note) and
   try to pay it, or let the code make random bills. A random bill is a genuine bill changed in one known way; the
   plan decides what must happen, and the code compares. "Check 100 random bills" runs in a throwaway sandbox.
+- **Scam check** (student Home → "Check a message"): paste a message and see which words look like a scam
+  (pressure, a stranger offering to pay, fake police, secrecy, changed bank details, a refund that needs money first,
+  account numbers the family never saved). It never says "safe", never sends the pasted text to Qwen and never writes
+  it to the audit log. **Spot the scam** is an 8-message quiz that reveals what gave each message away, with the
+  public report it copies.
+- **Family safe word** (family Settings): the family agrees a word with the student offline. With it set, approving
+  CNY 10,000 or more, a changed bank account, or a request with warnings needs it; three wrong tries lock it for
+  15 minutes; only a salted hash is kept. The app cannot tell who is calling: it stops one-tap approval under pressure.
+- **Save a new payee** (family Settings): a payee saved now can be paid only after 48 hours.
+- **Save report (.md)** in the scam panel: a plain-text record of the session's attempts (not demo evidence).
 - **Problem research** with sources: [docs/PROBLEM_RESEARCH.md](docs/PROBLEM_RESEARCH.md), and a collector for
   Reddit, YouTube and X posts to run on a team computer (`tools/opinion_collect.py`).
 
@@ -142,6 +153,12 @@ docker run --rm -p 127.0.0.1:8765:8765 studybridge
 Do not expose the web UI to the internet. It has no user authentication, because it is a
 single-user sandbox (see the known-risk list).
 
+**Hosted demo (Render, for judges):** the server answers only to `localhost` unless a host name is named on purpose, so
+that another website cannot use it (DNS rebinding). On Render, `RENDER_EXTERNAL_HOSTNAME` is set automatically and
+is allowed; on any other host, or with a custom domain, set `STUDYBRIDGE_ALLOWED_HOSTS` to the comma-separated host
+names. If the page shows `{"error": "unexpected host"}`, the host is not on the list. Because there are no logins, a
+public deployment lets anyone press every button: share the link only for the judging period.
+
 ## Example requests
 
 ```
@@ -182,11 +199,13 @@ studybridge/
     guard.py        grounding guard, injection and pressure-wording detectors, de-obfuscation
     threats.py      names an attack (OWASP LLM Top 10 ids) for refusals, the red alert and the score
     audit.py        hash-chained audit log, PII masking
-  challenge.py      the 32 ready-made attacks of "Try to scam StudyBridge"
+  challenge.py      the 35 ready-made attacks of "Try to scam StudyBridge"
+  cases.py          scam patterns from public reports, with the page each was read on; quiz messages
+  scamcheck.py      "is this message a scam?" (rules only) and the Spot-the-scam quiz
   invoicelab.py     make a test bill, seeded random bills with the answer the plan requires
   web.py static/    local web UI (strict CSP, CSRF header, textContent rendering)
   demo.py           scripted run of the 31 stories that writes the evidence
-tests/              218 unit tests
+tests/              245 unit tests
 docs/               technical documentation, security self-assessment, problem research
 tools/              opinion_collect.py (run by hand on a team computer; not part of the app)
 evidence/           sandbox operation logs; v0.1 runs in evidence/archive_v0.1

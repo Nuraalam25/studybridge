@@ -69,7 +69,9 @@ def dump(sandbox) -> dict:
                    "processed": w._processed},
         "book": {"invoices": b.invoices, "documents": b.documents, "family_name": b.family_name,
                  "family_limit": b.family_limit, "requests": b.requests, "allowances": b.allowances,
-                 "limit_raises": b.limit_raises, "new_accounts": b._new_accounts, "spent": dict(b._spent)},
+                 "limit_raises": b.limit_raises, "new_accounts": b._new_accounts, "spent": dict(b._spent),
+                 "safe_word": b.safe_word, "safe_word_fails": b.safe_word_fails,
+                 "safe_word_locked_until": b.safe_word_locked_until},
     })
 
 
@@ -97,6 +99,8 @@ def load(sandbox, data: dict):
     b.requests, b.allowances = bb["requests"], bb["allowances"]
     b.limit_raises, b._new_accounts = bb["limit_raises"], bb["new_accounts"]
     b._spent = defaultdict(Decimal, bb["spent"])
+    b.safe_word, b.safe_word_fails = bb.get("safe_word"), list(bb.get("safe_word_fails") or [])
+    b.safe_word_locked_until = bb.get("safe_word_locked_until")
 
 
 def save_file(sandbox, path: Path):

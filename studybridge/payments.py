@@ -7,8 +7,11 @@ and payee type come from stored data. The message can only select a stored
 invoice or a saved payee, plus an amount for food and QR payments (which
 have no invoice and are therefore capped).
 """
+import hashlib
+import hmac
 import re
 import secrets
+import unicodedata
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -45,6 +48,9 @@ class PaymentBook:
         self.limit_raises = {}  # date -> CNY limit for that one day, approved by the family
         self._new_accounts = {}  # request id -> reported account number (kept out of snapshots)
         self._spent = defaultdict(Decimal)   # (date, bucket) -> CNY; in memory only (known weakness)
+        self.safe_word = None                # {"salt", "hash", "set_at"}: only a salted hash is kept, never the word
+        self.safe_word_fails = []            # sandbox times of wrong tries
+        self.safe_word_locked_until = None
 
     # ------------------------------------------------------------ counters
     def spent_today(self, bucket: str) -> Decimal:
@@ -175,6 +181,14 @@ class PaymentBook:
                  f"so a stored invoice, bill or quote is required."
                  + (f" Open documents from this payee: {', '.join(options)}." if options else ""))
         ok("Payee type", f"{payee['name']}: {payee['type']} (from stored data, never from the message)")
+        wait = self.cooling_left(payee)
+        if wait is not None:
+            fail("PAYEE_COOLING_OFF", "New payee wait",
+                 f"{payee['name']} was saved by the family on {payee['saved_on']}. A new payee can be paid after "
+                 f"{_iso(payee['saved_ts'] + PAYMENT['new_payee_hold_hours'] * 3600)} "
+                 f"({PAYMENT['new_payee_hold_hours']}-hour wait).")
+        if payee.get("saved_ts") is not None and payee["type"] not in EXEMPT_TYPES:
+            ok("New payee wait", f"{payee['name']} has been saved for over {PAYMENT['new_payee_hold_hours']} hours")
 
         if inv is not None:
             pay.update(invoice_id=inv["id"], purpose=inv["purpose"], kind=inv.get("kind"),
@@ -358,6 +372,105 @@ class PaymentBook:
         self.requests[rid] = r
         return r
 
+    # ------------------------------------------------------------ the family safe word
+    # The family agrees a word with its student offline. When someone phones or messages asking the family to approve
+    # something urgent, the family asks for the word first. The app cannot tell who is calling; what it does is stop
+    # a one-tap approval of the risky requests, make the family type the word, and lock after three wrong tries.
+    @staticmethod
+    def _norm_word(word) -> str:
+        return " ".join(unicodedata.normalize("NFKC", str(word or "")).strip().lower().split())
+
+    @staticmethod
+    def _word_hash(word: str, salt: str) -> str:
+        return hashlib.pbkdf2_hmac("sha256", word.encode("utf-8"), bytes.fromhex(salt), 120_000).hex()
+
+    def _check_safe_word_lock(self):
+        until = self.safe_word_locked_until
+        if until and self.clock.ts() < until:
+            raise PaymentBlocked("SAFE_WORD_LOCKED", f"Three wrong tries. Locked until {_iso(until)}.")
+
+    def _verify_safe_word(self, given):
+        self._check_safe_word_lock()
+        word = self._norm_word(given)
+        if not word:
+            raise PaymentBlocked("SAFE_WORD_REQUIRED", "Type the family's safe word.")
+        ok = hmac.compare_digest(self._word_hash(word, self.safe_word["salt"]), self.safe_word["hash"])
+        now = self.clock.ts()
+        if ok:
+            self.safe_word_fails = []
+            return
+        self.safe_word_fails = [t for t in self.safe_word_fails if now - t < 600] + [now]
+        left = PAYMENT["safe_word_max_fails"] - len(self.safe_word_fails)
+        if left <= 0:
+            self.safe_word_locked_until = now + PAYMENT["safe_word_lock_minutes"] * 60
+            self.safe_word_fails = []
+            raise PaymentBlocked("SAFE_WORD_LOCKED", f"Too many wrong tries. Locked until "
+                                                     f"{_iso(self.safe_word_locked_until)}.")
+        raise PaymentBlocked("SAFE_WORD_WRONG", f"Not the safe word. {left} {'try' if left == 1 else 'tries'} left.")
+
+    def set_safe_word(self, word, current=None) -> bool:
+        """Set, change or (with an empty word) remove the safe word. Changing or removing needs the current word.
+        Returns True if a word is set afterwards."""
+        if self.safe_word:
+            self._verify_safe_word(current)
+        w = self._norm_word(word)
+        if not w:
+            if not self.safe_word:
+                raise PaymentBlocked("INVALID_CHOICE", "There is no safe word to remove.")
+            self.safe_word = None
+            return False
+        if not (4 <= len(w) <= 40) or len(set(w.replace(" ", ""))) < 3:
+            raise PaymentBlocked("INVALID_CHOICE", "Choose a safe word of 4 to 40 characters that is not just one "
+                                                   "repeated letter.")
+        salt = secrets.token_hex(8)
+        self.safe_word = {"salt": salt, "hash": self._word_hash(w, salt), "set_at": _iso(self.clock.ts())}
+        self.safe_word_fails, self.safe_word_locked_until = [], None
+        return True
+
+    def safe_word_reason(self, r: dict):
+        """Why approving this request needs the safe word, or None. Rejecting never needs it."""
+        if not self.safe_word:
+            return None
+        if r["kind"] == "account_change":
+            return "a changed bank account"
+        if r["kind"] in ("tuition", "allowance"):
+            if r.get("warnings"):
+                return "the request carries warnings"
+            if r["currency"] != "CNY" or r["amount"] >= PAYMENT["safe_word_from_cny"]:
+                return f"a payment of CNY {PAYMENT['safe_word_from_cny']:,.0f} or more"
+        return None
+
+    # ------------------------------------------------------------ a payee the family saves later
+    def add_payee(self, name: str, ptype: str, account: str, confirmed: bool) -> dict:
+        """The family saves a new payee. It cannot be paid until `new_payee_hold_hours` have passed."""
+        name = " ".join(str(name or "").split())[:60]
+        digits = re.sub(r"[ -]", "", str(account or ""))
+        if not name or not (6 <= len(digits) <= 24 and digits.isdigit()):
+            raise PaymentBlocked("INVALID_CHOICE", "Give the payee's name and an account number of 6 to 24 digits.")
+        if ptype not in ("institution", "landlord", "merchant", "person_or_agent"):
+            raise PaymentBlocked("INVALID_CHOICE", f"'{ptype}' is not a payee type the family can save.")
+        if confirmed is not True:
+            raise PaymentBlocked("INVALID_CHOICE", "Tick the box to say you checked these details with the payee "
+                                                   "yourself (by phone or in person), not from a message or a bill.")
+        if self._owner_of(digits) is not None:
+            raise PaymentBlocked("INVALID_CHOICE", "That account is already saved for another payee.")
+        if len(self.payees) >= 30:
+            raise PaymentBlocked("INVALID_CHOICE", "Too many saved payees for the sandbox.")
+        pid = "payee_" + secrets.token_hex(3)
+        p = {"id": pid, "name": name, "type": ptype, "currency": "CNY", "account_number": digits, "verified": True,
+             "saved_by": "family", "saved_on": _iso(self.clock.ts()), "saved_ts": self.clock.ts(),
+             "aliases": [name.lower()]}
+        self.payees[pid] = p
+        return p
+
+    def cooling_left(self, payee: dict):
+        """Seconds until a newly saved payee can be paid, or None."""
+        ts = payee.get("saved_ts")
+        if ts is None or payee["type"] in EXEMPT_TYPES:
+            return None
+        left = ts + PAYMENT["new_payee_hold_hours"] * 3600 - self.clock.ts()
+        return int(left) if left > 0 else None
+
     # ------------------------------------------------------------ one-day limit raise
     def create_limit_raise(self, cny, day: date, note: str, case_id: str, warnings=()) -> dict:
         v = q(cny)
@@ -401,7 +514,8 @@ class PaymentBook:
         return r
 
     # ------------------------------------------------------------ family decisions
-    def decide(self, request_id: str, approve: bool, hours=None, phone_verified: bool = False, months=None) -> dict:
+    def decide(self, request_id: str, approve: bool, hours=None, phone_verified: bool = False, months=None,
+               safe_word=None) -> dict:
         self.expire()
         r = self.requests.get(request_id)
         if r is None:
@@ -415,6 +529,9 @@ class PaymentBook:
             raise PaymentBlocked("PHONE_CHECK_REQUIRED",
                                  f"Call {r['payee_name']} on the number on file ({r.get('phone_on_file') or 'none'}), "
                                  f"not a number on the bill, before approving {r['new_account']}.")
+        if approve and self.safe_word_reason(r):
+            self._verify_safe_word(safe_word)
+            r["safe_word_ok"] = True
         if approve and r["kind"] == "allowance":
             hours = self._choice(hours, 1, PAYMENT["allowance_max_hours"], "Validity (hours)")
             months = self._choice(months, 1, PAYMENT["monthly_allowance_max_months"], "Months")
@@ -607,7 +724,11 @@ class PaymentBook:
             "bank_limit_usd": PAYMENT["bank_daily_limit_usd"],
             "bank_limit_cny": self.bank_limit_cny(),
             "exempt_cap_cny": PAYMENT["exempt_cap_cny"],
+            "safe_word": {"set": bool(self.safe_word), "from_cny": PAYMENT["safe_word_from_cny"],
+                          "locked_seconds_left": left(self.safe_word_locked_until)},
+            "new_payee_hold_hours": PAYMENT["new_payee_hold_hours"],
             "payees": [{"id": p["id"], "name": p["name"], "type": p["type"], "verified": p.get("verified", False),
+                        "saved_on": p.get("saved_on"), "cooling_seconds_left": self.cooling_left(p),
                         "account": mask_account(p["account_number"]) if p.get("account_number") else None,
                         "on_hold": mask_account(p["pending_account"]) if p.get("pending_account") else None,
                         "hold_seconds_left": left(p.get("hold_until_ts"))}
@@ -620,7 +741,8 @@ class PaymentBook:
                           "lab": bool(i.get("lab")), "xray": self._xray(i), "doc": self._doc(i)}
                          for i in self.invoices.values()],
             "documents": [{"key": k, **v} for k, v in self.documents.items()],
-            "requests": [{**{k: v for k, v in r.items() if not k.endswith("_ts")}, "seconds_left": req_left(r)}
+            "requests": [{**{k: v for k, v in r.items() if not k.endswith("_ts")}, "seconds_left": req_left(r),
+                          "needs_safe_word": self.safe_word_reason(r) if r["status"] == "pending" else None}
                          for r in self.requests.values()],
             "allowances": [{**{k: v for k, v in a.items() if not k.endswith("_ts")},
                             "seconds_left": left(a["expires_ts"]) if a["status"] == "open" else None}

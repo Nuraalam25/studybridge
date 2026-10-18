@@ -48,8 +48,12 @@ ACTOR_ACTIONS = {
     "decide": {"family"},
     "set_limit": {"family"},
     "set_doc": {"family"},
+    "set_safe_word": {"family"},             # the family's own safe word (never chat)
+    "add_payee": {"family"},                 # only the family saves a payee; it then waits 48 hours
     "cancel_allowance": {"family"},          # the student has no cancel button (plan §5.2)
     "ask_cancel": {"student"},               # ...but can ask the family to cancel
+    "check_message": {"student"},            # paste a message: is it a scam? (text only, cannot start a payment)
+    "scam_quiz": {"student"},                # Spot-the-scam quiz
     "ack_alert": {"family"},                 # the family marks a stopped payment as seen
     # Sandbox operator controls (the person running the demo, from the screen).
     "set_tier": {"operator"},

@@ -88,6 +88,18 @@ REASONS = {
                             "Wait a minute, then start the payment again."),
     "CONFIRMATION_EXPIRED": ("The 2-minute confirmation window passed.", "Start the payment again."),
     "TOOL_ERROR": ("The request could not be completed.", "Check the request and try again."),
+    "SAFE_WORD_REQUIRED": ("The family set a safe word, and this approval needs it (a large payment, a changed bank "
+                           "account, or a request with warnings).",
+                           "Ask the person who is asking for the money for the safe word, on a call you start "
+                           "yourself. Type it here. If they cannot say it, reject the request."),
+    "SAFE_WORD_WRONG": ("That is not the family's safe word. Nothing was approved.",
+                        "Check the word with your student by calling them yourself. After 3 wrong tries the "
+                        "safe word locks for 15 minutes."),
+    "SAFE_WORD_LOCKED": ("Too many wrong safe words in a short time, so approving is locked for a few minutes.",
+                         "Wait, then call your student yourself before trying again. Rejecting is still possible."),
+    "PAYEE_COOLING_OFF": ("A payee the family saved less than 48 hours ago cannot be paid yet. The wait gives the "
+                          "family time to notice a mistake or a scam.",
+                          "Wait until the time shown, and check the account with the payee in the meantime."),
     "LLM_UNAVAILABLE": ("Qwen is not running on this computer, so it cannot be switched on.",
                         "Start Ollama with the qwen2.5:7b model, then switch Qwen on again."),
 }

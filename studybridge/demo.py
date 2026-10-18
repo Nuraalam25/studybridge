@@ -166,6 +166,74 @@ def run_demo(args, out_root: Path):
           ["", f"Total: {good}/{len(random_bills)} as expected; no payment was executed in this section.", ""]
     print(f"[random bills] {good}/{len(random_bills)} as expected")
 
+    md += ["## Safeguards", "",
+           "*The attacks from the \"Try to scam StudyBridge\" panel, the scam-message checker on the quiz messages, the "
+           "family safe word and the wait for a new payee. Each starts from a fresh sandbox. Nothing is paid.*", ""]
+    from .challenge import ATTACKS
+    from . import scamcheck
+    from .cases import QUIZ
+    waiting = {"AWAITING_FAMILY", "ALLOWANCE_REQUESTED"}
+    attack_rows = []
+    for a in ATTACKS:
+        sandbox.reset()
+        for _ in range(a.get("burst", 1)):
+            r = sandbox.act("student", "chat", {"message": a["message"]})
+        kind = "stopped" if r.blocked or r.code == "CLARIFY" else "waits" if r.code in waiting else "answered"
+        moved = len(sandbox.agent.wallet._processed)
+        attack_rows.append({"id": a["id"], "group": a["group"], "owasp": a["owasp"], "expect": a["expect"],
+                            "outcome": kind, "code": r.code, "threat": (r.threat or {}).get("label"),
+                            "money_moved": moved, "as_expected": kind == a["expect"] and moved == 0})
+    good_attacks = sum(x["as_expected"] for x in attack_rows)
+    md += ["| Attack | Group | Expected | Got | Code | Money moved |", "|---|---|---|---|---|---|"] + \
+          [f"| {x['id']} | {x['group']} | {x['expect']} | {x['outcome']} | {x['code']} | {x['money_moved']} |"
+           for x in attack_rows] + ["", f"Attacks ending as expected with no money moved: {good_attacks}/{len(attack_rows)}.", ""]
+    checker = []
+    for q in QUIZ:
+        res = scamcheck.check(q["text"])
+        checker.append({"id": q["id"], "is_scam": q["scam"], "level": res["level"], "signals": [s["kind"] for s in res["signals"]],
+                        "as_expected": (res["level"] != "ok") == q["scam"]})
+    good_checker = sum(c["as_expected"] for c in checker)
+    md += [f"Scam-message checker on the {len(checker)} quiz messages: {good_checker}/{len(checker)} judged as labelled "
+           "(a scam is never \"ok\"; a genuine message has no warning).", ""]
+
+    def seq(label, steps):
+        out_codes = [c for c in steps]
+        md.append(f"- {label}: {' -> '.join(out_codes)}")
+        return out_codes
+
+    sandbox.reset()
+    sandbox.act("family", "set_safe_word", {"word": "Quokka Parade"})
+    rid = sandbox.act("student", "chat", {"message": "pay invoice INV-0003"}).request_id
+    word_codes = []
+    for w in (None, "wrong one", "wrong two", "wrong three", "quokka parade"):
+        word_codes.append(sandbox.act("family", "decide", {"request_id": rid, "approve": True, "safe_word": w}).code)
+    sandbox.act("operator", "advance_clock", {"hours": 0.3})
+    word_codes.append(sandbox.act("family", "decide", {"request_id": rid, "approve": True, "safe_word": "quokka parade"}).code)
+    word_expected = ["SAFE_WORD_REQUIRED", "SAFE_WORD_WRONG", "SAFE_WORD_WRONG", "SAFE_WORD_LOCKED", "SAFE_WORD_LOCKED",
+                     "TUITION_APPROVED"]
+    seq("Safe word on a CNY 22,800 tuition approval (no word, three wrong tries, the right word while locked, then "
+        "after 18 minutes)", word_codes)
+    sandbox.reset()
+    pid = sandbox.act("family", "add_payee", {"name": "Green Flat Landlord", "type": "landlord",
+                                              "account": "6217000099887766", "confirmed": True}).data["payee_id"]
+    inv = sandbox.act("operator", "add_invoice", {"payee_id": pid, "kind": "bill", "amount": "250",
+                                                  "account_mode": "saved"}).data["invoice_id"]
+    cool_codes = [sandbox.act("student", "chat", {"message": f"pay invoice {inv}"}).code]
+    sandbox.act("operator", "advance_clock", {"hours": 47})
+    cool_codes.append(sandbox.act("student", "chat", {"message": f"pay invoice {inv}"}).code)
+    sandbox.act("operator", "advance_clock", {"hours": 2})
+    cool_codes.append(sandbox.act("student", "chat", {"message": f"pay invoice {inv}"}).code)
+    cool_ok = cool_codes[:2] == ["PAYEE_COOLING_OFF"] * 2 and cool_codes[2] != "PAYEE_COOLING_OFF"
+    seq("A payee saved by the family, paid at once / after 47 h / after 49 h", cool_codes)
+    md.append("")
+    safeguards = {"attacks": {"count": len(attack_rows), "as_expected": good_attacks, "rows": attack_rows},
+                  "scam_checker": {"count": len(checker), "as_expected": good_checker, "rows": checker},
+                  "safe_word": {"codes": word_codes, "as_expected": word_codes == word_expected},
+                  "new_payee_wait": {"codes": cool_codes, "as_expected": cool_ok}}
+    print(f"[safeguards] attacks {good_attacks}/{len(attack_rows)}, checker {good_checker}/{len(checker)}, "
+          f"safe word {'ok' if safeguards['safe_word']['as_expected'] else 'MISMATCH'}, "
+          f"new payee {'ok' if cool_ok else 'MISMATCH'}")
+
     verification = audit.verify()
     head = {"records": verification.get("records"), "head_hash": audit._last}
     tampered = out / "audit_tampered_copy.jsonl"
@@ -186,7 +254,7 @@ def run_demo(args, out_root: Path):
                "random_bills": {"count": len(random_bills), "as_expected": good,
                                 "by_scenario": {k: {"bills": v[0], "as_expected": v[1]} for k, v in sorted(by_scenario.items())},
                                 "bills": random_bills},
-               "wording_checks": wording, "readers_per_message": dict(sorted(sandbox.qwen_roles.items())),
+               "safeguards": safeguards, "wording_checks": wording, "readers_per_message": dict(sorted(sandbox.qwen_roles.items())),
                "audit_head": head,
                "audit_verification": verification, "tamper_test_on_copy": tamper_result,
                "python": sys.version.split()[0]}
@@ -195,6 +263,9 @@ def run_demo(args, out_root: Path):
            f"- Information requests answered as expected: {sum(i['as_expected'] for i in info)}/{len(info)}",
            f"- Audit head (to detect a truncated log later): {head['records']} records, hash {head['head_hash']}",
            f"- Random bills answered as the plan's rules require: {good}/{len(random_bills)}",
+           f"- Safeguards: attacks as expected with no money moved {good_attacks}/{len(attack_rows)}; scam checker "
+           f"{good_checker}/{len(checker)}; safe word flow {'as expected' if safeguards['safe_word']['as_expected'] else 'MISMATCH'}; "
+           f"new-payee wait {'as expected' if cool_ok else 'MISMATCH'}",
            f"- Executed payments: {codes['EXECUTED']}; sentences cut by the guard: {guard_cuts}",
            f"- Scams stopped across all stories (each counted once): {scams_total}. "
            "Each story's share is in summary.json (`scams_stopped_added`).",

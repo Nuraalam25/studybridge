@@ -87,6 +87,10 @@ PAYMENT = {
     "monthly_allowance_max_months": 6,       # rent only; one payment per calendar month
     "account_change_hold_hours": 24,         # wait after the family's phone check
     "limit_raise_days_ahead": 7,             # a one-day raise can be booked up to 7 days ahead
+    "safe_word_from_cny": D("10000"),        # with a family safe word set, approving this much or more needs it
+    "safe_word_max_fails": 3,                # wrong tries before the safe word is locked
+    "safe_word_lock_minutes": 15,
+    "new_payee_hold_hours": 48,              # a payee the family has just saved cannot be paid until this has passed
 }
 # Payee types and whether a stored invoice / bill / quote is required.
 PAYEE_TYPES = {

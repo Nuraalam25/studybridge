@@ -11,6 +11,7 @@ the page renders all text with textContent, never innerHTML. The role
 switch is a sandbox demo control: there is no user login (known risk).
 """
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -18,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import PACKAGE_ROOT
+from . import PACKAGE_ROOT, __version__
 from .challenge import ATTACKS, GROUPS
 from .security.audit import AuditLog
 from .stories import STORY_BY_ID
@@ -26,6 +27,16 @@ from .stories import STORY_BY_ID
 STATIC = PACKAGE_ROOT / "static"
 MAX_BODY = 8 * 1024
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def allowed_hosts() -> set:
+    """Host names this server answers to: this machine, plus any the operator names on purpose. On a host such as
+    Render, set STUDYBRIDGE_ALLOWED_HOSTS (comma separated) or let RENDER_EXTERNAL_HOSTNAME (set by Render) name the
+    public address. Nothing else is ever allowed, so a page on another site still cannot use the server (DNS
+    rebinding and cross-site requests stay refused)."""
+    extra = {h.strip().lower() for h in os.environ.get("STUDYBRIDGE_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    render = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip().lower()
+    return _LOCAL_HOSTS | extra | ({render} if render else set())
 _FILES = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
           "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
@@ -93,11 +104,12 @@ def _make_handler(sandbox):
         def _local(self, post=False) -> bool:
             """Only answer requests addressed to this machine. A DNS-rebinding page sends its own host name
             in Host, and a cross-site page sends its own Origin; both are refused."""
+            hosts = allowed_hosts()
             host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
-            if host not in _LOCAL_HOSTS:
+            if host not in hosts:
                 return False
             origin = self.headers.get("Origin")
-            if post and origin and (urlsplit(origin).hostname or "").lower() not in _LOCAL_HOSTS:
+            if post and origin and (urlsplit(origin).hostname or "").lower() not in hosts:
                 return False
             return True
 
@@ -115,7 +127,7 @@ def _make_handler(sandbox):
                     return self._json(200, sandbox.stories())
                 if self.path == "/api/attacks":
                     return self._json(200, {"groups": [{"id": g, "title": t, "owasp": o} for g, t, o in GROUPS],
-                                            "attacks": ATTACKS})
+                                            "attacks": ATTACKS, "version": __version__})
                 if self.path == "/api/audit/tail":
                     return self._json(200, _audit_tail(sandbox.audit.path))
                 if self.path == "/api/audit/verify":

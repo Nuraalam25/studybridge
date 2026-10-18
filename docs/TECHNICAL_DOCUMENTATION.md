@@ -331,7 +331,7 @@ expected codes are unchanged. Built by Nura, merged and adjusted on 17 October 2
   screen shows the bill exactly as written: a missing letter is a gap ("Univers▯ty") with a sentence saying
   which letter is missing. It opens from **Why?** in Bills and by itself in the Glass Box when Gate 1 stops a
   bill on its account, name or wording. A test checks that no full account number reaches the snapshot.
-- **Try to scam it** (`challenge.py`, `/api/attacks`): ready-made attacks (32 since v0.4, see 3.8) and a free-text box, each sent
+- **Try to scam it** (`challenge.py`, `/api/attacks`): ready-made attacks (35 since v0.4, see 3.8) and a free-text box, each sent
   as an ordinary student chat message through `/api/act`, so every gate, tier and actor check applies. A
   scoreboard counts attempts, stopped, waiting for the family, waiting for the student, and money moved
   without both (always 0). A test sends every attack to a fresh sandbox and checks that nothing executes.
@@ -410,8 +410,9 @@ model's role visible, and it tests bills the sample file does not contain.
   ("Did you mean ...?"); it is single-use, tied to that message, and every gate still applies afterwards. When
   the readers disagree, the existing CLARIFY path applies (now also showing Qwen's reading). With Qwen off
   nothing about decisions changes.
-- **Try to scam StudyBridge** (`challenge.py`): 32 attacks in six groups (payment scams 8, prompt injection 10,
-  secrets and the assistant's instructions 5, excessive agency 4, output handling 1, unbounded consumption 2),
+- **Try to scam StudyBridge** (`challenge.py`): 35 attacks in seven groups (payment scams 8, patterns copied from public reports 5,
+  prompt injection 10, secrets and the assistant's instructions 5, excessive agency 4, output handling 1,
+  unbounded consumption 2),
   each with the outcome it must end in (`stopped`, `waits`, `answered`). A test sends every attack to a fresh
   sandbox, checks the outcome and that no money moved. Free text goes through the same path and is named.
 - **Red alert.** When a response carries a threat (an attack kind, or a Gate 1 refusal for a look-alike
@@ -438,6 +439,51 @@ model's role visible, and it tests bills the sample file does not contain.
   `wording_checks`, `readers_per_message` and `random_bills`.
 - **Research.** `docs/PROBLEM_RESEARCH.md` (sources read on 18 October 2026) and `tools/opinion_collect.py`
   (collector for Reddit, YouTube and X posts, run by hand; never part of the app).
+
+### 3.9 Scam check, quiz, safe word, new-payee wait, report and hosted use (v0.4, 18 October)
+
+Again no gate, limit, story or expected outcome changed: with no safe word and no payee added, the 31 stories behave
+as before.
+
+- **Scam check** (`scamcheck.py`, actions `check_message` and `scam_quiz`, student only). Regex signals for the patterns in
+  public reports (`cases.py`): pressure, a deal that is too good, a stranger offering to pay, fake authority, an
+  invented fee, secrecy, changed bank details, hard-to-trace payment methods, a refund that needs money first,
+  requests for logins or codes, a link, a "family member" on a new number, an agent's deposit, wording aimed at an AI
+  assistant, and account numbers that the family has not saved (only the last four digits come back). The verdict
+  (`ok`, `warn`, `danger`) comes from a score and from a set of strong signals; `ok` is worded "No warning signs
+  found in the wording" and always adds that it is not a clearance. The pasted text is never written to the audit
+  log (only its length, the signal names and the score) and is never sent to Qwen. When Qwen is on, it gets the
+  verdict and the signal names and may write up to three plain sentences, which pass the same slot filler and
+  guard, plus a ban on words like "safe" or "legitimate" (`FORBIDDEN_TERMS["scam_check"]`).
+- **Spot the scam** (`cases.QUIZ`, 8 made-up messages, 6 scams copied from reported patterns and 2 genuine). The
+  server returns the messages without answers, grades each answer, and reveals the checker's signals and the source.
+  A test requires that the checker judges every quiz message the way its label says.
+- **Cases attacks.** Five attacks in the panel copy reported patterns (a stranger's discount, a "police" call, "send
+  part of the refund back", an agent's deposit, an invented government charge) with the account of a stranger; each
+  shows its source link. All five end at Gate 1 (`PAYEE_NOT_VERIFIED`).
+- **Family safe word** (`PaymentBook.set_safe_word`, `safe_word_reason`, `decide(..., safe_word=)`). Set by the
+  family on its own screen; changing or removing needs the current word. Approving is gated when the request is a
+  changed bank account, carries warnings, or is a tuition or allowance request of CNY 10,000 or more (any other
+  currency counts as large). Rejecting never needs the word. Wrong tries: 3 within 10 minutes lock approving for
+  15 minutes of sandbox time. The word is normalised (case, spaces), stored as a salted PBKDF2-SHA256 hash, saved in
+  the optional state file as the hash only, and never appears in the audit log, the screen data, Qwen prompts or
+  chat (asking for it in chat is a `SECRET_REQUEST`). **Honest limit:** the app cannot tell who is on the phone. The
+  word makes the family stop and ask the caller for it, stops a one-tap approval, and blocks guessing; it does not
+  prove the caller's identity. Reset clears it.
+- **New payee wait** (`add_payee`, family only; `cooling_left`; Gate 1 check "New payee wait"). The family saves
+  a payee (name, type, 6-24 digit account, a tick that they checked it themselves). It cannot be paid for 48 hours
+  of sandbox time (`PAYEE_COOLING_OFF`, not counted as a scam). Food and QR payees are exempt as before. The sample
+  payees have no `saved_ts`, so they are never held. Lab bills can use a new payee, which makes the wait easy to show
+  with the clock button.
+- **Report** (`Save report (.md)` in the panel): built in the browser from the session's attempts and the last
+  random-bill check; marked as not demo evidence.
+- **Hosted use** (`web.allowed_hosts`): the Host and Origin check still refuses every name except localhost and the
+  names given in `STUDYBRIDGE_ALLOWED_HOSTS` (comma separated) or `RENDER_EXTERNAL_HOSTNAME`. Without this a Render
+  deployment answers `{"error": "unexpected host"}`. There is still no login: a public link lets anyone use every
+  screen.
+- **Demo** (`demo.py`, section "Safeguards", `summary.json` key `safeguards`): replays the 35 attacks (each
+  must end as its `expect` field says with no money moved), the checker on the 8 quiz messages, one safe-word sequence
+  and one new-payee sequence.
 
 ## 4. Security design (summary — full detail in SECURITY_SELF_ASSESSMENT.md)
 
@@ -525,7 +571,7 @@ regression test too.
 
 | Check | Result |
 |---|---|
-| Unit tests (v0.4) | 218 / 218 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
+| Unit tests (v0.4) | 245 / 245 pass (`python -m unittest discover -s tests -t .`), including all 31 stories, regressions from real Qwen output, sample-data checks and a check that every reason code is exercised |
 | Scripted runs v0.4 | To be generated from the final code after the freeze (rules-only and with qwen2.5:7b); the counts go here and in `evidence/README.md` from each `summary.json` |
 | v0.2 runs (`evidence/run_20261015_*`, earlier version, 25 stories) | rules-only 25/25; with Qwen 25/25, guard cut 15 sentences, 2 residual entity-binding errors; first Qwen run 24/25 (fixed, now regression tests) |
 | v0.1 runs (archived in `evidence/archive_v0.1/`) | run A rules-only, run B guard v1, run C guard v2: real history of the earlier version, kept unedited |

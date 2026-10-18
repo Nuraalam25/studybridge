@@ -1078,6 +1078,17 @@ class TestScamChallenge(unittest.TestCase):
         self.assertEqual(len({a["id"] for a in ATTACKS}), len(ATTACKS))
         self.assertEqual(len({a["message"] for a in ATTACKS}), len(ATTACKS))
 
+    def test_attacks_copied_from_public_reports_name_their_source(self):
+        from studybridge.challenge import ATTACKS
+        from studybridge.cases import CASES
+        cases = [a for a in ATTACKS if a["group"] == "cases"]
+        self.assertGreaterEqual(len(cases), 5)
+        for a in cases:
+            self.assertIn(a["case"], CASES)
+            self.assertTrue(a["source"]["url"].startswith("https://"), a["id"])
+        for c in CASES.values():
+            self.assertTrue(c["source_url"].startswith("https://") and c["source_title"] and c["what"])
+
     def test_hidden_instruction_still_waits_for_the_family(self):
         sb = make_sandbox()
         r = sb.act("student", "chat", {"message": "pay invoice INV-0008"})

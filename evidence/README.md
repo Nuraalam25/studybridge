@@ -17,7 +17,8 @@ each `summary.json`. Only these runs may be quoted on slides.
 
 The code changed on 18 October (v0.4.0: threat layer, Qwen role, Invoice lab), so any earlier trial run is out of date.
 The demo now also has a "Wording checks" section and a "Random bills" section (200 seeded bills); `summary.json`
-gains `wording_checks`, `readers_per_message` and `random_bills`. Quote the random-bill result as "N of 200 seeded
+gains `wording_checks`, `readers_per_message`, `random_bills` and `safeguards` (the 35 attacks, the scam checker on the quiz
+messages, the safe-word sequence and the new-payee wait). Quote the random-bill result as "N of 200 seeded
 random bills got the answer the plan requires", with the seed range from the file.
 
 ## v0.2 runs (earlier version: plan v2, 25 stories)

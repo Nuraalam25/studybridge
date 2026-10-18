@@ -31,7 +31,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time as dtime
 from decimal import Decimal
 
-from . import bangla, budget, credit, fx, invoicelab, remittance, slots, tuition
+from . import bangla, budget, credit, fx, invoicelab, remittance, scamcheck, slots, tuition
 from .clock import SandboxClock
 from .config import (CONFIRM_LOCK_SECONDS, CONFIRM_MAX_FAILS, CONFIRM_TTL_SECONDS, CURRENCY_ALIASES, EXEMPT_TYPES,
                      HOME_CURRENCY, LIMITS, PAYMENT, RATE_SOURCE, WALLET_FX_SPREAD)
@@ -89,6 +89,8 @@ FORBIDDEN_TERMS = {
     "spending_insights": [r"\bincome\b.*\bmonths?\b"],  # runway comes from wallet value, not income
     "pay": [r"\b(has been|was|is now) (paid|sent|transferred)\b", r"\bapproved\b"],
     "request_allowance": [r"\bapproved\b", r"\b(has been|was|is now) paid\b"],   # it is only requested
+    "scam_check": [r"\b(is|are|looks?|seems?|appears?) (safe|legit|legitimate|genuine|real|fine|okay|ok)\b",
+                   r"\bno risk\b", r"\bnothing to worry\b", r"\bguarantee"],   # a check never clears a message
 }
 # Status words an explanation may only use when the outcome really says so.
 _PAID_WORDS = (r"\b(paid|transferred|processed|complete|completed|settled|successful|successfully|done)\b|"
@@ -1174,6 +1176,65 @@ class StudentFinanceAgent:
         return AgentResponse(f"Random test bill made ({gen['title']}). Message to send: {message}",
                              "generate_invoice", data=data)
 
+    # ------------------------------------------------------------ scam check and quiz (text only, no money)
+    def _saved_payees(self):
+        return [{"name": p["name"], "account_number": p.get("account_number", ""), "verified": p.get("verified")}
+                for p in self.book.payees.values() if p.get("verified")]
+
+    def check_message(self, text: str, actor: str = "student") -> AgentResponse:
+        """Is this pasted message a scam? Rules decide (scamcheck.py). The pasted text is never sent to Qwen and is
+        never written to the audit log; when Qwen is on it may write up to three plain sentences from the list of
+        signal names only. Nothing here can start a payment."""
+        if not actor_allowed(actor, "check_message"):
+            return self._actor_refused(actor, "check_message")
+        text = str(text or "")
+        if not text.strip():
+            return self._blocked_action("check_message", "INVALID_CHOICE", "Paste the message you want checked.")
+        res = scamcheck.check(text, self._saved_payees())
+        self.audit.append("scam_check", {"length": res["length"], "level": res["level"], "score": res["score"],
+                                         "signals": [s["kind"] for s in res["signals"]]})
+        facts = f"{res['verdict']}." + (
+            " Signs found: " + "; ".join(s["label"] for s in res["signals"]) + "." if res["signals"] else "")
+        explain, used_qwen, removed = "", False, []
+        if self.llm is not None and self.narrate:
+            # Qwen sees the names of the signals and the verdict, never the pasted text.
+            view = {"verdict": res["verdict"], "level": res["level"],
+                    "signals": [{"kind": s["kind"], "label": s["label"]} for s in res["signals"]],
+                    "similar_public_case": (res["case"] or {}).get("title")}
+            payload = json.dumps(view, ensure_ascii=False)
+            prompt = (f"Task: explain to a student, in plain words, why a message they pasted got this verdict. "
+                      f"You are not shown the message.\nJSON: {payload}\nNUMBERS (write each only as its "
+                      f"placeholder): none")
+            try:
+                draft = self.llm.chat_text(EXPLAIN_SYSTEM, prompt)
+                filled, cut = slots.fill(str(draft), {}, {})
+                explain, guarded = enforce_grounding(filled, [payload, facts], forbidden=FORBIDDEN_TERMS["scam_check"]
+                                                     + status_words_forbidden(view))
+                removed = cut + guarded
+                used_qwen = bool(explain)
+            except LLMError as exc:
+                self.audit.append("llm_explain_failed", {"error": str(exc)[:200]})
+        res["qwen"] = {"used": used_qwen, "text": explain, "cut": len(removed),
+                       "note": ("Qwen wrote the plain-words line from the signal names only; it was not shown the "
+                                "message." if used_qwen else
+                                "Code only. The pasted text is never sent to Qwen, and Qwen was " +
+                                ("not able to add a line." if self.llm is not None else "off."))}
+        return AgentResponse(facts, "scam_check", data=res, guard_removed=removed)
+
+    def scam_quiz(self, actor: str = "student") -> AgentResponse:
+        if not actor_allowed(actor, "scam_quiz"):
+            return self._actor_refused(actor, "scam_quiz")
+        return AgentResponse("Scam or genuine? Decide for each message.", "scam_quiz",
+                             data={"items": scamcheck.quiz_items()})
+
+    def scam_quiz_answer(self, item_id: str, says_scam, actor: str = "student") -> AgentResponse:
+        if not actor_allowed(actor, "scam_quiz"):
+            return self._actor_refused(actor, "scam_quiz")
+        res = scamcheck.quiz_answer(str(item_id), says_scam is True, self._saved_payees())
+        if res is None:
+            return self._blocked_action("scam_quiz", "NOT_FOUND", "No such quiz message.")
+        return AgentResponse("Right." if res["right"] else "Not quite.", "scam_quiz", data=res)
+
     # ------------------------------------------------------------ actor actions (outside chat)
     def _actor_refused(self, actor: str, action: str, case=None) -> AgentResponse:
         who = ", ".join(sorted(ACTOR_ACTIONS.get(action, ())))
@@ -1190,24 +1251,28 @@ class StudentFinanceAgent:
                              code=code, fix=fix_for(code), case_id=case["id"] if case else None)
 
     def family_decide(self, request_id: str, approve: bool, actor: str = "family", hours=None,
-                      phone_verified: bool = False, months=None) -> AgentResponse:
+                      phone_verified: bool = False, months=None, safe_word=None) -> AgentResponse:
         r0 = self.book.requests.get(request_id)
         case = self.cases.get(r0["case_id"]) if r0 else None
         if not actor_allowed(actor, "decide"):
             return self._actor_refused(actor, "decide", case)
         step = "6a" if r0 and r0["kind"] == "tuition" else "8b"
         try:
-            r = self.book.decide(request_id, approve, hours, phone_verified=phone_verified, months=months)
+            r = self.book.decide(request_id, approve, hours, phone_verified=phone_verified, months=months,
+                                 safe_word=safe_word)
         except PaymentBlocked as b:
-            if b.code != "PHONE_CHECK_REQUIRED":
+            if b.code not in ("PHONE_CHECK_REQUIRED", "SAFE_WORD_REQUIRED", "SAFE_WORD_WRONG", "SAFE_WORD_LOCKED"):
                 self._step(case, step, "fail", f"{b.code}: {b.detail}")
-            if case:
+            if case and b.code.startswith("SAFE_WORD"):
+                self._note(case, f"An approval attempt was refused ({b.code}); the request is still waiting.")
+            elif case:
                 case["outcome"] = b.code
             return self._blocked_action("decide", b.code, b.detail, case)
         fam = self.book.family_name
         self.audit.append("family_decision", {"request": r["id"], "kind": r["kind"], "approved": approve,
                                               "actor": actor, "allowance": r.get("allowance_id"),
-                                              "phone_verified": bool(r.get("phone_verified"))})
+                                              "phone_verified": bool(r.get("phone_verified")),
+                                              "safe_word_checked": bool(r.get("safe_word_ok"))})
         if not approve:
             if r["kind"] in ("tuition", "allowance"):
                 self._step(case, step, "fail", f"The {fam} rejected {r['id']}. Nothing moves.")
@@ -1332,6 +1397,34 @@ class StudentFinanceAgent:
             return self._blocked_action("set_limit", b.code, b.detail)
         self.audit.append("family_setting", {"family_daily_limit_cny": str(v), "actor": actor})
         return AgentResponse(f"Family daily limit set to CNY {v:,.0f}.", "set_limit", code="SETTING_CHANGED")
+
+    def family_set_safe_word(self, word, current=None, actor: str = "family") -> AgentResponse:
+        """Set, change or remove the family's safe word. The word is never logged, shown or sent to Qwen."""
+        if not actor_allowed(actor, "set_safe_word"):
+            return self._actor_refused(actor, "set_safe_word")
+        try:
+            now_set = self.book.set_safe_word(word, current)
+        except PaymentBlocked as b:
+            return self._blocked_action("set_safe_word", b.code, b.detail)
+        self.audit.append("family_setting", {"safe_word": "set" if now_set else "removed", "actor": actor})
+        return AgentResponse("Safe word saved. Approving a large payment, a changed bank account or a request with "
+                             "warnings now needs it." if now_set else "Safe word removed.", "set_safe_word",
+                             code="SETTING_CHANGED")
+
+    def family_add_payee(self, args: dict, actor: str = "family") -> AgentResponse:
+        if not actor_allowed(actor, "add_payee"):
+            return self._actor_refused(actor, "add_payee")
+        try:
+            p = self.book.add_payee(args.get("name"), str(args.get("type") or ""), args.get("account"),
+                                    args.get("confirmed") is True)
+        except PaymentBlocked as b:
+            return self._blocked_action("add_payee", b.code, b.detail)
+        self.audit.append("payee_saved", {"payee": p["id"], "name": p["name"], "type": p["type"],
+                                          "account": mask_account(p["account_number"]), "actor": actor})
+        hold = PAYMENT["new_payee_hold_hours"]
+        return AgentResponse(f"{p['name']} saved. It can be paid after {hold} hours "
+                             f"({datetime.fromtimestamp(p['saved_ts'] + hold * 3600).isoformat(timespec='minutes')}).",
+                             "add_payee", code="SETTING_CHANGED", data={"payee_id": p["id"]})
 
     def family_set_doc(self, key: str, ready: bool, actor: str = "family") -> AgentResponse:
         if not actor_allowed(actor, "set_doc"):
