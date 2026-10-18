@@ -114,12 +114,12 @@ async function api(path, body) {
   return r.json();
 }
 
-function toast(text) {
+function toast(text, ms = 2600) {
   const tb = $("toast");
   tb.textContent = text;
   tb.classList.add("show");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => tb.classList.remove("show"), 2600);
+  toast._t = setTimeout(() => tb.classList.remove("show"), ms);
 }
 
 // ------------------------------------------------------------------ actions
@@ -144,6 +144,10 @@ function onResponse(actor, action, args, r) {
     else if (r.code === "ALLOWANCE_APPROVED") addSys(`The family approved allowance ${r.allowance_id}. Pay when you are at the shop.`, r.suggestion);
     else if (r.code === "REJECTED_BY_FAMILY") addSys("The family rejected the request. Nothing moved.");
     else if (r.blocked && !String(r.code).startsWith("SAFE_WORD")) addSys(`Family action refused: ${human(r.code)}`);
+  } else if (r.blocked && action === "set_llm") {
+    // Say why Qwen could not be switched on (no key, wrong model id, service unreachable), and keep it on screen longer.
+    const why = (String(r.text).split("\n").find((l) => l.startsWith("Why: ")) || "").slice(5);
+    toast(`${human(r.code)}: ${why || r.fix}`, 9000);
   } else toast(r.blocked ? `${human(r.code)}: ${r.fix}` : r.text);
 }
 
